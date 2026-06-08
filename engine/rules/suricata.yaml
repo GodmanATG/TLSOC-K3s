@@ -1,0 +1,22 @@
+pattern_name: "suricata"
+strategy: "stateless"
+
+
+regex: '(?P<timestamp>\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+)\s+\[\*\*\]\s+\[(?P<gid>\d+):(?P<sid>\d+):(?P<rev>\d+)\]\s+(?P<signature>[^\[]+)\s+\[\*\*\]\s+\[Classification:\s+(?P<class>[^\]]+)\]\s+\[Priority:\s+(?P<priority>\d+)\]\s+\{(?P<proto>\w+)\}\s+(?P<src_ip>[\d\.]+):(?P<src_port>\d+)\s+->\s+(?P<dst_ip>[\d\.]+):(?P<dst_port>\d+)'
+
+mapping:
+
+  sid: "event.code"
+  signature: "event.reason"
+  class: "event.category"
+  priority: "event.severity"
+  proto: "network.transport"
+  src_ip: "source.ip"
+  src_port: "source.port"
+  dst_ip: "destination.ip"
+  dst_port: "destination.port"
+
+static:
+  event.type: "ids_alert"
+  #event.module: "suricata"
+  #observer.type: "ids"

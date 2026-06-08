@@ -1,0 +1,55 @@
+pattern_name: "modsec"
+
+strategy: "json_map"
+
+mapping:
+  # Transaction core
+  transaction.unique_id: "event.id"
+  transaction.time_stamp: "event.created"
+  transaction.server_id: "observer.id"
+
+  transaction.client_ip: "source.ip"
+  transaction.client_port: "source.port"
+  transaction.host_ip: "destination.ip"
+  transaction.host_port: "destination.port"
+
+  # Request core
+  transaction.request.method: "http.request.method"
+  transaction.request.http_version: "http.version"
+  transaction.request.uri: "url.path"
+
+  # Important request headers
+  transaction.request.headers.Host: "url.domain"
+  transaction.request.headers.User-Agent: "user_agent.original"
+  transaction.request.headers.Referer: "http.request.referrer"
+  transaction.request.headers.Origin: "http.request.headers.origin"
+  transaction.request.headers.Cookie: "http.request.headers.cookie"
+  transaction.request.headers.Content-Type: "http.request.mime_type"
+  transaction.request.headers.Content-Length: "http.request.body.bytes"
+
+  # Response
+  transaction.response.http_code: "http.response.status_code"
+  transaction.response.headers.Server: "http.response.headers.server"
+  transaction.response.headers.Content-Type: "http.response.mime_type"
+
+  # Producer info
+  transaction.producer.modsecurity: "observer.product"
+  transaction.producer.connector: "observer.vendor"
+  transaction.producer.secrules_engine: "rule.engine"
+
+  # Messages extraction (multi alerts)
+  transaction.messages.*.message: "event.reason"
+  transaction.messages.*.details.ruleId: "rule.id"
+  transaction.messages.*.details.severity: "event.severity"
+  transaction.messages.*.details.data: "event.payload"
+  transaction.messages.*.details.match: "event.match"
+  transaction.messages.*.details.file: "rule.file"
+  transaction.messages.*.details.lineNumber: "rule.line"
+  transaction.messages.*.details.tags: "rule.tags"
+
+static:
+  event.kind: "alert"
+  event.category: "web"
+  event.type: "waf"
+  event.action: "blocked"
+  service.type: "modsecurity"

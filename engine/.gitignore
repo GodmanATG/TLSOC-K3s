@@ -1,0 +1,28 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env
+
+# Logs & runtime data
+logs/
+*.log
+dlq.json
+stats.json
+
+# Output directory
+soc_output/
+var/log/soc_output/
+
+# Redis dump
+dump.rdb
+
+# GeoIP database (license restricted)
+database/*.mmdb
+
+# OS noise
+.DS_Store

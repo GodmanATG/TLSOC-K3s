@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+  namespace: tlsoc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logstash
+  template:
+    metadata:
+      labels:
+        app: logstash
+    spec:
+      containers:
+        - name: logstash
+          image: docker.elastic.co/logstash/logstash:8.19.12
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          env:
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tlsoc-credentials
+                  key: ELASTIC_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /
+              port: 9600
+            failureThreshold: 20
+            periodSeconds: 15
+            initialDelaySeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9600
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 9600
+            periodSeconds: 30
+            failureThreshold: 3
+            initialDelaySeconds: 120
+          volumeMounts:
+            - name: logstash-pipeline
+              mountPath: /usr/share/logstash/pipeline/kafka-to-es.conf
+              subPath: kafka-to-es.conf
+            - name: logstash-settings
+              mountPath: /usr/share/logstash/config/logstash.yml
+              subPath: logstash.yml
+            - name: logstash-settings
+              mountPath: /usr/share/logstash/config/pipelines.yml
+              subPath: pipelines.yml
+            - name: tls-certs
+              mountPath: /usr/share/logstash/config/certs/ca.crt
+              subPath: ca.crt
+            - name: tls-certs
+              mountPath: /usr/share/logstash/config/certs/logstash.crt
+              subPath: logstash.crt
+            - name: tls-certs
+              mountPath: /usr/share/logstash/config/certs/logstash.key
+              subPath: logstash.key
+            - name: parser-output
+              mountPath: /parser_output
+              readOnly: true
+      volumes:
+        - name: logstash-pipeline
+          configMap:
+            name: logstash-config
+        - name: logstash-settings
+          configMap:
+            name: logstash-config
+        - name: tls-certs
+          secret:
+            secretName: tlsoc-tls-certs
+        - name: parser-output
+          persistentVolumeClaim:
+            claimName: parser-output
+            readOnly: true

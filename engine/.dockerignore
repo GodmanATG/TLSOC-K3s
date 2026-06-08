@@ -1,0 +1,61 @@
+# .dockerignore — tells Docker what to EXCLUDE from the build context
+# When you run 'docker build', Docker sends the entire build directory
+# to the Docker daemon. .dockerignore prevents it from sending files
+# you don't need inside the container, making builds faster and images smaller.
+
+# ── Python cache files ──────────────────────────────────────────────
+# Python creates these automatically when it imports .py files.
+# They're machine-specific and regenerated automatically — never include them.
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# ── Virtual environments ─────────────────────────────────────────────
+# If someone ran pip install in a local venv, exclude it entirely.
+# The container installs its own deps from requirements.txt.
+venv/
+.venv/
+env/
+
+# ── Runtime-generated files ──────────────────────────────────────────
+# These are created when the engine runs. They don't belong in the image.
+# In production they go into mounted volumes (persisted outside container).
+logs/
+*.log
+dlq.json
+stats.json
+
+# ── The GeoIP database ───────────────────────────────────────────────
+# This is downloaded at build time via the ARG MAXMIND_LICENSE_KEY step.
+# If someone already has it locally, don't copy it into the build context
+# (Docker will download a fresh one if the key is provided).
+# Uncomment the next line ONLY if you want to always bake it into the image:
+# database/
+
+# ── Git metadata ─────────────────────────────────────────────────────
+# No reason to include version control data in the container.
+.git/
+.gitignore
+
+# ── Test files ───────────────────────────────────────────────────────
+# The test scripts are for development only — not needed in the running container.
+test_rules.py
+test_file.py
+sample_logs.txt
+
+# ── Documentation ────────────────────────────────────────────────────
+README.md
+
+# ── OS/Editor junk ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# ── The install/setup scripts ────────────────────────────────────────
+# These are for bare-metal install. The container doesn't need them.
+install.sh
+setup_service.sh

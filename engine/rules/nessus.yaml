@@ -1,0 +1,46 @@
+pattern_name: "nessus"
+
+strategy: "json_map"
+
+mapping:
+  # Scan metadata from info section
+  info.uuid: "event.id"
+  info.name: "event.dataset"
+  info.policy: "rule.ruleset"
+  info.scan_start: "@timestamp"
+  info.scan_end: "event.end"
+  info.status: "event.outcome"
+  info.targets: "destination.address"
+  info.scanner_name: "observer.name"
+  
+  # For vulnerabilities array - extract each vulnerability
+  # Note: This will create multiple events if there are multiple vulnerabilities
+  vulnerabilities.*.plugin_id: "rule.id"
+  vulnerabilities.*.plugin_name: "rule.name"
+  vulnerabilities.*.plugin_family: "rule.category"
+  vulnerabilities.*.severity: "event.severity"
+  vulnerabilities.*.score: "event.risk_score"
+  vulnerabilities.*.vpr_score: "vulnerability.score.vpr"
+  vulnerabilities.*.epss_score: "vulnerability.score.epss"
+  vulnerabilities.*.cpe: "vulnerability.enumeration"
+  vulnerabilities.*.count: "event.count"
+  
+  # Host summary information
+  hosts.*.hostname: "host.ip"
+  hosts.*.host_id: "host.id"
+  hosts.*.critical: "vulnerability.severity.critical_count"
+  hosts.*.high: "vulnerability.severity.high_count"
+  hosts.*.medium: "vulnerability.severity.medium_count"
+  hosts.*.low: "vulnerability.severity.low_count"
+  hosts.*.info: "vulnerability.severity.info_count"
+  hosts.*.score: "host.risk_score"
+
+static:
+  event.kind: "alert"
+  event.category: "vulnerability"
+  event.type: "info"
+  event.module: "nessus_raw"
+  service.type: "nessus"
+  observer.type: "scanner"
+  observer.vendor: "tenable"
+  observer.product: "nessus"

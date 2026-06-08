@@ -1,0 +1,94 @@
+pattern_name: "postfix"
+
+strategy: "stateful"
+id_regex: '(?P<id>[A-Z0-9]{10,12}):'
+end_signal: "removed"
+
+patterns:
+  - regex: '\s(?P<hostname>[a-zA-Z0-9-]+)\spostfix\/'
+    mapping: { "hostname": "host.name" }
+
+  - regex: 'sasl_username=(?P<auth_user>[^, ]+)'
+    mapping: { "auth_user": "user.name" }
+
+  # Internal Sender
+  - regex: 'from=<(?P<sender>[^@]+@(?P<s_domain>iitb\.ac\.in))>'
+    mapping: { "sender": "email.from", "s_domain": "email.sender_domain" }
+    static: { "email.internal_sender": true, "email.sender_type": "internal" }
+
+  # External Sender
+  - regex: 'from=<(?P<sender>[^@]+@(?P<s_domain>(?!iitb\.ac\.in)[^>]+))>'
+    mapping: { "sender": "email.from", "s_domain": "email.sender_domain" }
+    static: { "email.internal_sender": false, "email.sender_type": "external" }
+
+  # Internal Recipient
+  - regex: 'to=<(?P<recipient>[^@]+@(?P<r_domain>iitb\.ac\.in))>.*status=(?P<status>[a-z]+)'
+    mapping: { "recipient": "email.to", "r_domain": "email.recipient_domain", "status": "event.outcome" }
+    static: { "email.external_recipient": false, "email.recipient_type": "internal" }
+
+  # External Recipient
+  - regex: 'to=<(?P<recipient>[^@]+@(?P<r_domain>(?!iitb\.ac\.in)[^>]+))>.*status=(?P<status>[a-z]+)'
+    mapping: { "recipient": "email.to", "r_domain": "email.recipient_domain", "status": "event.outcome" }
+    static: { "email.external_recipient": true, "email.recipient_type": "external" }
+
+  - regex: 'relay=(?P<relay_host>[^\[]+)\[(?P<relay_ip>[\d\.]+)\]'
+    mapping: { "relay_host": "email.relay.hostname", "relay_ip": "email.relay.ip" }
+
+  - regex: 'client=(?P<host>.*?)\[(?P<ip>[\d\.]+)\]'
+    mapping: { "ip": "source.ip" }
+
+  - regex: 'postfix/bounce.*sender non-delivery notification: (?P<bounce_id>\w+)'
+    mapping: { "bounce_id": "event.reason" }
+    static: { "event.outcome": "bounced" }
+
+
+  - regex: 'connect from (?P<client_host>[^\[]+)\[(?P<ip>[\d\.]+)\]'
+    mapping: { "client_host": "source.domain", "ip": "source.ip" }
+    static: { "event.action": "smtp_connect" }
+
+  - regex: 'disconnect from (?P<client_host>[^\[]+)\[(?P<ip>[\d\.]+)\].*commands=(?P<commands>\d+)'
+    mapping: { "client_host": "source.domain", "ip": "source.ip", "commands": "event.command_count|int" }
+    static: { "event.action": "smtp_disconnect" }
+
+  - regex: 'Anonymous TLS connection established from (?P<client_host>[^\[]+)\[(?P<ip>[\d\.]+)\]: (?P<tls_version>TLSv[\d\.]+) with cipher (?P<cipher>[A-Z0-9\-]+)'
+    mapping: { "client_host": "source.domain", "ip": "source.ip", "tls_version": "tls.version", "cipher": "tls.cipher" }
+    static: { "event.action": "tls_connection", "network.protocol": "smtp" }
+
+  - regex: 'warning: TLS not available with (?P<client_host>[^\[]+)\[(?P<ip>[\d\.]+)\]'
+    mapping: { "client_host": "source.domain", "ip": "source.ip" }
+    static: { "event.action": "tls_unavailable", "event.outcome": "warning" }
+
+  - regex: 'message-id=<(?P<message_id>[^>]+)>'
+    mapping: { "message_id": "email.message_id" }
+
+  - regex: 'from=<(?P<sender>[^>]+)>, size=(?P<size>\d+), nrcpt=(?P<recipient_count>\d+)'
+    mapping: { "sender": "email.from", "size": "email.size|int", "recipient_count": "email.recipient_count|int" }
+
+  - regex: 'dsn=(?P<dsn>[245]\.[\d\.]+)'
+    mapping: { "dsn": "email.dsn" }
+
+  - regex: 'status=deferred'
+    static: { "event.outcome": "deferred" }
+
+  - regex: 'status=bounced'
+    static: { "event.outcome": "bounced" }
+
+  - regex: 'status=sent'
+    static: { "event.outcome": "success" }
+
+  - regex: 'relay=local'
+    static: { "email.delivery.type": "local" }
+
+  - regex: 'NOQUEUE: reject: RCPT from (?P<client_host>[^\[]+)\[(?P<ip>[\d\.]+)\]: (?P<code>\d+ \d+\.\d+\.\d+) (?P<reason>.*?); from=<(?P<sender>[^>]+)> to=<(?P<recipient>[^>]+)>'
+    mapping: { "client_host": "source.domain", "ip": "source.ip", "code": "event.code", "reason": "event.reason", "sender": "email.from", "recipient": "email.to" }
+    static: { "event.action": "smtp_reject", "event.outcome": "failure" }
+
+  - regex: 'greylisting'
+    static: { "event.reason": "greylisted" }
+
+  - regex: 'virus detected: (?P<virus_name>.*)'
+    mapping: { "virus_name": "threat.name" }
+    static: { "event.category": "malware", "event.outcome": "detected" }
+
+  - regex: 'sasl_method=(?P<method>\w+)'
+    mapping: { "method": "authentication.method" }

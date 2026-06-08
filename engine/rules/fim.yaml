@@ -1,0 +1,22 @@
+pattern_name: "fim"
+
+strategy: "json_map"
+
+mapping:
+
+#  raw.@timestamp: "event.created"
+#  raw.host: "host.name"
+
+  action: "event.action"
+#  raw.rule: "rule.name"
+
+  file_path: "file.path"
+  owner: "file.owner"
+  owner_uid: "file.owner_uid"
+  mode: "file.mode"
+
+static:
+  event.kind: "alert"
+  event.category: "file"
+  event.type: "change"
+  service.type: "fim"

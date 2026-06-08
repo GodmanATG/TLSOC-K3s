@@ -1,0 +1,35 @@
+pattern_name: "openvas"
+strategy: "xml_xpath"
+
+# Iterate over every vulnerability found in the report
+items_xpath: ".//results/result"
+
+mapping:
+  # 1. Identity & Context
+  "name": "vulnerability.name"
+  "nvt/@oid": "vulnerability.id"
+  "nvt/cve": "vulnerability.cve"
+  "nvt/family": "vulnerability.category"
+
+  # 2. Target Information
+  "host": "destination.ip"
+  "port": "destination.port"
+
+  # 3. Severity & Confidence
+  "threat": "vulnerability.threat"
+  "severity": "vulnerability.severity|float"
+  "nvt/cvss_base": "vulnerability.cvss.base_score|float"
+  "qod/value": "vulnerability.confidence|int"            # Quality of Detection (Filters out False Positives)
+
+  # 4. Descriptions & Remediation
+  "nvt/solution": "vulnerability.resolution"             # The actual step-by-step fix
+  "nvt/tags": "vulnerability.description"                # Contains the full summary, impact, and insight
+  "description": "vulnerability.evidence"                # The exact proof/payload the scanner found
+
+  # 5. Timestamps
+  "creation_time": "event.created"
+  "modification_time": "event.modified"
+
+static:
+  event.category: "vulnerability"
+  event.type: "report"

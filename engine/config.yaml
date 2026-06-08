@@ -1,0 +1,65 @@
+kafka:
+  # -------------------------------------------------------------------------
+  # CONNECTION SETTINGS
+  # -------------------------------------------------------------------------
+  # Replace with your Kafka IP and Port
+  bootstrap_servers: ["192.168.10.57:9094"]
+
+  # -------------------------------------------------------------------------
+  # TOPIC SELECTION
+  # -------------------------------------------------------------------------
+  # Option 1: Single Topic (Plain Text)
+  # If you only have one topic, just write its name:
+  # input_topic: "soc-logs"
+
+  # Option 2: Multiple Topics (Regex)
+  # If you want to listen to multiple topics at once, use Regex.
+  # This example listens to 'linux', 'firewall', OR 'web':
+  input_topic: "^(webserver|vulnerability|mailserver|proxyserver|summersoc|.*)$"
+
+  group_id: "aryan-windows"
+  auto_offset_reset: "latest"
+
+batch:
+  # Performance tuning: Write to disk every 1000 logs OR every 5 seconds
+  size: 1000
+  timeout_sec: 5
+
+paths:
+  # Where to save the parsed JSON files
+  output_dir: "/var/log/soc_output/"
+  # Where your .yaml rule files are located
+  rules_dir: "rules/"
+
+program_mapping:
+  # -------------------------------------------------------------------------
+  # MAPPING LOGIC
+  # -------------------------------------------------------------------------
+  # Syntax: "source_program_name": "rule_file_name"
+  # The 'source_program' is the program name found in your raw logs (e.g. from rsyslog).
+  # The 'rule_file_name' is the name of the YAML file in rules/ (without .yaml).
+
+  # CASE 1: Linux Authentication (SSH, Sudo, Su)
+  # Map multiple server types to the single 'linux_auth.yaml' rule
+  waf_auth: "linux_auth"
+  mail_auth: "linux_auth"
+  web_auth: "linux_auth"
+  summersoc_auth_logs: "linux_auth"
+  
+  # CASE 2: Web Servers (Nginx & Apache)
+  # Nginx access logs are identical to Apache, so we reuse 'apache.yaml'
+  waf-nginx-access: "apache_access"
+  mail_apache_access: "apache_access"     
+  web_apache_access: "apache_access"      
+
+  # CASE 3: WAF & Security
+  modsec_audit_log: "modsec"
+
+  # CASE 4: Mail Services
+  postfix: "postfix"
+  roundcube_login: "roundcube"
+
+geoip:
+  enabled: true
+  # Ensure your MMDB file is placed inside the 'database' folder
+  db_path: "database/GeoLite2-City.mmdb"

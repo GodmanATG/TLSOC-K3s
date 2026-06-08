@@ -1,0 +1,30 @@
+pattern_name: "roundcube"
+
+strategy: "multi_match"
+
+patterns:
+  # 1. Failed Login
+  # Log: <session> Failed login for user... from Proxy (X-Real-IP: Real)
+  - name: "login_failed"
+    regex: 'Failed login for (?P<user>[^ ]+) from (?P<proxy_ip>[\d\.]+) \(X-Real-IP: (?P<real_ip>[\d\.]+)'
+    mapping:
+      user: "user.name"
+      real_ip: "source.ip"        # <--- The User's actual IP
+      proxy_ip: "server.nat.ip"   # <--- The Load Balancer IP
+    static:
+      event.action: "login"
+      event.outcome: "failure"
+      event.module: "roundcube"
+
+  # 2. Successful Login
+  # Log: <session> Successful login for user... (ID: 41) from Proxy (X-Real-IP: Real)
+  - name: "login_success"
+    regex: 'Successful login for (?P<user>[^ ]+) \(ID: \d+\) from (?P<proxy_ip>[\d\.]+) \(X-Real-IP: (?P<real_ip>[\d\.]+)'
+    mapping:
+      user: "user.name"
+      real_ip: "source.ip"
+      proxy_ip: "server.nat.ip"
+    static:
+      event.action: "login"
+      event.outcome: "success"
+      event.module: "roundcube"

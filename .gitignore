@@ -1,0 +1,17 @@
+# Auto-generated secrets with real cert data — never commit
+k8s/01-secrets.yaml
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# GeoIP database (too large for git, downloaded at build time)
+*.mmdb
+
+# Editor files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

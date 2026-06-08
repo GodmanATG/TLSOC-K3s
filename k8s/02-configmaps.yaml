@@ -1,0 +1,166 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-config
+  namespace: tlsoc
+data:
+  ELASTIC_VERSION: "8.19.12"
+  ELASTIC_HEAP: "2g"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: tlsoc
+data:
+  logstash.yml: |
+    xpack.monitoring.enabled: false
+    http.host: "0.0.0.0"
+
+  pipelines.yml: |
+    - pipeline.id: logs
+      path.config: "/usr/share/logstash/pipeline/kafka-to-es.conf"
+
+  kafka-to-es.conf: |
+    input {
+      file {
+        path => "/parser_output/*.json"
+        start_position => "end"
+        sincedb_path => "/usr/share/logstash/data/sincedb"
+        codec => json
+        mode => "tail"
+      }
+    }
+    filter {
+      if [meta.server] {
+        mutate { replace => { "[host][name]" => "%{[meta.server]}" } }
+      }
+      else if [meta.source_host] {
+        mutate { replace => { "[host][name]" => "%{[meta.source_host]}" } }
+      }
+    }
+    output {
+      elasticsearch {
+        hosts => ["https://elasticsearch:9200"]
+        cacert => "/usr/share/logstash/config/certs/ca.crt"
+        user => "elastic"
+        password => "${ELASTIC_PASSWORD}"
+        index => "fosstlsoc-logs-%{+YYYY.MM.dd}"
+      }
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  namespace: tlsoc
+data:
+  # ⚠️  Update to your WSL/machine IP — run: hostname -I | awk '{print $1}'
+  KAFKA_ADVERTISED_HOST: "10.51.29.64"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: engine-config
+  namespace: tlsoc
+data:
+  config.yaml: |
+    kafka:
+      bootstrap_servers: ["192.168.10.57:9094"]
+      input_topic: "^(webserver|vulnerability|mailserver|proxyserver|summersoc|.*)$"
+      group_id: "foss-soc-engine"
+      auto_offset_reset: "earliest"
+    batch:
+      size: 1000
+      timeout_sec: 5
+    paths:
+      output_dir: "/var/log/soc_output/"
+      rules_dir: "rules/"
+    program_mapping:
+      waf_auth: "linux_auth"
+      mail_auth: "linux_auth"
+      web_auth: "linux_auth"
+      summersoc_auth_logs: "linux_auth"
+      waf-nginx-access: "apache_access"
+      mail_apache_access: "apache_access"
+      web_apache_access: "apache_access"
+      modsec_audit_log: "modsec"
+      postfix: "postfix"
+      roundcube_login: "roundcube"
+    geoip:
+      enabled: true
+      db_path: "database/GeoLite2-City.mmdb"
+    redis:
+      host: "redis.tlsoc.svc.cluster.local"
+      port: 6379
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: setup-scripts
+  namespace: tlsoc-ops
+data:
+  init.sh: |
+    #!/bin/bash
+    set -e
+    ES="https://elasticsearch.tlsoc.svc.cluster.local:9200"
+    KB="https://kibana.tlsoc.svc.cluster.local:5601"
+    CA="--cacert /certs/ca.crt"
+    AUTH="-u elastic:${ELASTIC_PASSWORD}"
+
+    echo "⏳ Waiting for Elasticsearch..."
+    until curl -sk $AUTH $CA "$ES/_cluster/health" | grep -q '"status"'; do
+      echo "   not ready yet, retrying in 5s..."
+      sleep 5
+    done
+    echo "✅ Elasticsearch is up!"
+
+    echo "🔐 Setting kibana_system password..."
+    curl -sk -X POST $AUTH $CA -H "Content-Type: application/json" \
+      "$ES/_security/user/kibana_system/_password" \
+      -d "{\"password\":\"${KIBANA_PASSWORD}\"}"
+    echo -e "\n✅ Password set!"
+
+    echo "⏳ Waiting for Kibana..."
+    until curl -sk -I $AUTH $CA "$KB/api/status" | grep -q "200"; do
+      echo "   not ready yet, retrying in 5s..."
+      sleep 5
+    done
+    echo "✅ Kibana is up!"
+
+    echo "🌌 Creating TLSOC Space..."
+    B64=""
+    [ -f /setup/logo.png ] && B64="data:image/png;base64,$(base64 -w 0 /setup/logo.png)"
+    curl -sk -X POST "$KB/api/spaces/space" \
+      -H "kbn-xsrf: true" -H "Content-Type: application/json" \
+      $AUTH $CA \
+      -d "{\"id\":\"tlsoc\",\"name\":\"TLSOC\",\"color\":\"#6092C0\",\"imageUrl\":\"${B64}\"}"
+    echo -e "\n✅ Space created!"
+
+    echo "📊 Creating Data Views..."
+    curl -sk -X POST "$KB/s/tlsoc/api/data_views/data_view" \
+      -H "kbn-xsrf: true" -H "Content-Type: application/json" $AUTH $CA \
+      -d '{"data_view":{"title":"fosstlsoc-logs-*","name":"SIEM Rule View 1","id":"4ea16e42-92a0-4495-a6c1-a1848eb235f6"}}'
+    curl -sk -X POST "$KB/s/tlsoc/api/data_views/data_view" \
+      -H "kbn-xsrf: true" -H "Content-Type: application/json" $AUTH $CA \
+      -d '{"data_view":{"title":"fosstlsoc-logs-*","name":"SIEM Rule View 2","id":"60b3f25a-9745-44fb-95c8-f1b5e8c5b3c8"}}'
+    echo -e "\n✅ Data Views created!"
+
+    echo "📥 Importing Dashboards..."
+    curl -sk -X POST "$KB/s/tlsoc/api/saved_objects/_import?overwrite=true" \
+      -H "kbn-xsrf: true" $AUTH $CA --form file=@/setup/dashboards.ndjson
+    echo -e "\n✅ Dashboards imported!"
+
+    echo "📥 Importing SIEM Rules..."
+    curl -sk -X POST "$KB/s/tlsoc/api/detection_engine/rules/_import?overwrite=true" \
+      -H "kbn-xsrf: true" $AUTH $CA --form file=@/setup/rules.ndjson
+    echo -e "\n✅ SIEM Rules imported!"
+
+    echo ""
+    echo "======================================"
+    echo "🚀 TLSOC IS READY!"
+    echo "======================================"

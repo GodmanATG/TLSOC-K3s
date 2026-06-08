@@ -1,0 +1,39 @@
+2026-01-22T12:27:51+00:00 smtpnode1 postfix/smtpd[4123]: connect from client[203.0.113.45]
+2026-01-22T12:27:51+00:00 smtpnode1 postfix/smtpd[19876]: Anonymous TLS connection established from unknown[203.0.113.45]: TLSv1.2 with cipher ECDHE-RSA-AES128-GCM-SHA256 (128/128 bits)
+2026-01-22T12:27:51+00:00 smtpnode1 postfix/smtpd[19876]: A7F9C20D1AB: client=unknown[203.0.113.45], sasl_method=PLAIN, sasl_username=jdoe
+2026-01-22T12:27:51+00:00 smtpnode1 postfix/cleanup[20411]: A7F9C20D1AB: message-id=<f1a23b9c-9c44-4e6b-8b6e-92c2a1e5c111@example.edu>
+2026-01-22T12:27:51+00:00 smtpnode1 postfix/qmgr[30555]: A7F9C20D1AB: from=<jdoe@example.edu>, size=2450, nrcpt=1 (queue active)
+2026-01-22T12:27:51+00:00 smtpnode1 postfix/smtp[20987]: A7F9C20D1AB: to=<alice@example.net>, relay=mail-relay.example.net[198.51.100.25]:25, delay=0.03, delays=0.02/0/0/0.01, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as B8C341AA902)
+2026-01-22T12:27:51+00:00 smtpnode1 postfix/qmgr[30555]: A7F9C20D1AB: removed
+2026-01-22T12:27:51+00:00 smtpnode2 postfix/smtpd[27654]: connect from unknown[198.51.100.78]
+2026-01-22T12:27:51+00:00 smtpnode2 postfix/smtpd[27654]: Anonymous TLS connection established from unknown[198.51.100.78]: TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits)
+2026-01-22T12:27:51+00:00 smtpnode2 postfix/smtpd[27654]: C92D430FA11: client=unknown[198.51.100.78], sasl_method=PLAIN, sasl_username=msmith
+2026-01-22T12:27:51+00:00 smtpnode2 postfix/cleanup[27101]: C92D430FA11: message-id=<9a22cd44-acde-47fa-bbf0-0a01d93f9abc@example.org>
+2026-01-22T12:27:51+00:00 smtpnode2 postfix/qmgr[2156]: C92D430FA11: from=<msmith@example.org>, size=9821, nrcpt=1 (queue active)
+2026-01-22T12:27:51+00:00 smtpnode2 postfix/smtp[28100]: C92D430FA11: to=<bob@external.org>, relay=mail-relay.example.net[198.51.100.25]:25, delay=0.02, delays=0.01/0/0/0.01, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as C11EF902AA1)
+2026-01-22T12:27:51+00:00 smtpnode2 postfix/qmgr[2156]: C92D430FA11: removed
+2026-01-22T12:27:53+00:00 smtpnode3 postfix/smtpd[11022]: connect from unknown[192.0.2.91]
+2026-01-22T12:27:53+00:00 smtpnode3 postfix/smtpd[11022]: Anonymous TLS connection established from unknown[192.0.2.91]: TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits)
+2026-01-22T12:27:53+00:00 smtpnode3 postfix/smtpd[11022]: D4A9130BE9C: client=unknown[192.0.2.91], sasl_method=PLAIN, sasl_username=user123
+2026-01-22T12:27:53+00:00 smtpnode3 postfix/cleanup[10844]: D4A9130BE9C: message-id=<176906507357.99812.1234567890123456789@example.edu>
+2026-01-22T12:27:54+00:00 smtpnode3 postfix/qmgr[21234]: D4A9130BE9C: from=<user123@example.edu>, size=845321, nrcpt=2 (queue active)
+2026-01-22T12:27:54+00:00 smtpnode3 postfix/smtpd[11022]: disconnect from unknown[192.0.2.91] ehlo=2 starttls=1 auth=1 mail=1 rcpt=2 data=1 quit=1 commands=9
+2026-01-22T12:27:54+00:00 smtpnode3 postfix/smtp[10721]: D4A9130BE9C: to=<recipient1@gmail.com>, relay=mail-relay.example.net[198.51.100.25]:25, delay=0.25, delays=0.22/0/0/0.03, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as D91AC112F09)
+2026-01-22T12:27:54+00:00 smtpnode3 postfix/smtp[10721]: D4A9130BE9C: to=<recipient2@example.edu>, relay=mail-relay.example.net[198.51.100.25]:25, delay=0.25, delays=0.22/0/0/0.03, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as D91AC112F09)
+2026-01-22T12:27:54+00:00 smtpnode3 postfix/qmgr[21234]: D4A9130BE9C: removed
+2026-01-22T12:28:40+00:00 smtpnode1 postfix/smtp[3001]: 88ACD119EEE: to=<slow@external.net>, relay=none, delay=120, dsn=4.4.1, status=deferred (connect to mx.external.net[203.0.113.88]:25: Connection timed out)
+2026-01-22T12:29:10+00:00 smtpnode1 postfix/smtp[3011]: 99BCDE112AA: to=<nosuch@external.net>, relay=mx.external.net[198.51.100.25]:25, dsn=5.1.1, status=bounced (550 5.1.1 User unknown)
+2026-01-22T12:29:10+00:00 smtpnode1 postfix/bounce[3012]: 99BCDE112AA: sender non-delivery notification: 12AAEE998BC
+2026-01-22T12:30:01+00:00 smtpnode1 postfix/smtpd[3100]: connect from mx.remote.org[192.0.2.120]
+2026-01-22T12:30:02+00:00 smtpnode1 postfix/qmgr[30555]: AA9911BCDEE: from=<sender@remote.org>, size=4210, nrcpt=1 (queue active)
+2026-01-22T12:30:02+00:00 smtpnode1 postfix/local[3101]: AA9911BCDEE: to=<localuser@example.edu>, relay=local, dsn=2.0.0, status=sent (delivered to mailbox)
+2026-01-22T12:30:02+00:00 smtpnode1 postfix/qmgr[30555]: AA9911BCDEE: removed
+2026-01-22T12:31:12+00:00 smtpnode1 postfix/smtpd[3200]: NOQUEUE: reject: RCPT from spam.badhost.net[203.0.113.200]: 554 5.7.1 Spam policy violation; from=<spam@badhost.net> to=<user@example.edu>
+2026-01-22T12:31:55+00:00 smtpnode1 postfix/smtpd[3210]: NOQUEUE: reject: RCPT from mail.newsender.org[198.51.100.99]: 450 4.2.0 Try again later (greylisting); from=<info@newsender.org> to=<user@example.edu>
+2026-01-22T12:32:30+00:00 smtpnode1 postfix/cleanup[3300]: BB22EEFF991: virus detected: Eicar-Test-Signature
+2026-01-22T12:32:30+00:00 smtpnode1 postfix/qmgr[30555]: BB22EEFF991: removed
+2026-01-22T12:33:44+00:00 smtpnode1 postfix/smtp[3400]: CC77AA1199F: to=<full@external.net>, relay=mx.external.net[198.51.100.25]:25, dsn=5.2.2, status=bounced (552 5.2.2 Mailbox full)
+2026-01-22T12:35:00+00:00 smtpnode1 postfix/smtpd[3500]: connect from legacy.mail.org[203.0.113.77]
+2026-01-22T12:35:01+00:00 smtpnode1 postfix/smtpd[3500]: warning: TLS not available with legacy.mail.org[203.0.113.77]
+2026-01-22T12:36:20+00:00 smtpnode1 postfix/qmgr[30555]: DD9912ACEEE: from=<retry@example.edu>, size=6120, nrcpt=1 (queue active)
+2026-01-22T12:41:20+00:00 smtpnode1 postfix/smtp[3600]: DD9912ACEEE: to=<retry@external.net>, relay=mx.external.net[198.51.100.25]:25, dsn=4.4.1, status=deferred (temporary network failure)

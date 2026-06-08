@@ -1,0 +1,5 @@
+kafka-python-ng==2.2.2
+redis==5.0.1
+PyYAML>=6.0.1
+geoip2==4.8.0
+python-snappy==0.7.1

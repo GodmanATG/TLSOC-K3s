@@ -1,0 +1,2 @@
+subjectAltName = DNS:kibana,IP:192.168.10.62
+extendedKeyUsage = serverAuth

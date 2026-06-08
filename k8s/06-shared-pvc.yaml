@@ -1,0 +1,29 @@
+# parser-output: shared between FOSS Engine (write) and Logstash (read)
+# On single-node k3s, ReadWriteOnce works fine for multiple pods on same node.
+# Upgrade to ReadWriteMany (Longhorn) when adding more nodes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: parser-output
+  namespace: tlsoc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: "local-path"
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: foss-engine-logs
+  namespace: tlsoc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: "local-path"
+  resources:
+    requests:
+      storage: 2Gi

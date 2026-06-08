@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: tlsoc
+spec:
+  clusterIP: None
+  selector:
+    app: kafka
+  ports:
+    - name: internal
+      port: 9092
+    - name: controller
+      port: 9093
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: tlsoc
+spec:
+  selector:
+    app: kafka
+  ports:
+    - name: internal
+      port: 9092
+      targetPort: 9092
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-external
+  namespace: tlsoc
+spec:
+  type: NodePort
+  selector:
+    app: kafka
+  ports:
+    - name: external
+      port: 9094
+      targetPort: 9094
+      nodePort: 30094
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: tlsoc
+spec:
+  serviceName: kafka-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
+      tolerations:
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: kafka
+          image: apache/kafka:4.0.0
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: KAFKA_LISTENERS
+              value: "INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:9094,CONTROLLER://0.0.0.0:9093"
+            - name: KAFKA_ADVERTISED_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: kafka-config
+                  key: KAFKA_ADVERTISED_HOST
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "INTERNAL://kafka.tlsoc.svc.cluster.local:9092,EXTERNAL://$(KAFKA_ADVERTISED_HOST):30094"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "INTERNAL"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@kafka-0.kafka-headless.tlsoc.svc.cluster.local:9093"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_LOG_DIRS
+              value: "/var/lib/kafka/data"
+          ports:
+            - containerPort: 9092
+              name: internal
+            - containerPort: 9093
+              name: controller
+            - containerPort: 9094
+              name: external
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>/dev/null && echo ok"
+            failureThreshold: 12
+            periodSeconds: 10
+            initialDelaySeconds: 15
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>/dev/null && echo ok"
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>/dev/null && echo ok"
+            periodSeconds: 30
+            failureThreshold: 3
+            initialDelaySeconds: 60
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "local-path"
+        resources:
+          requests:
+            storage: 2Gi

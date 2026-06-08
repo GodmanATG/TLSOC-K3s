@@ -1,0 +1,2 @@
+subjectAltName = DNS:elasticsearch,IP:192.168.10.62
+extendedKeyUsage = serverAuth

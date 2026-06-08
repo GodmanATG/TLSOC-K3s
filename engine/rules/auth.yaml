@@ -1,0 +1,298 @@
+pattern_name: "linux_auth"
+strategy: "multi_match"
+
+patterns:
+
+# =========================================================
+# 1. SSH AUTHENTICATION (HIGHEST PRIORITY - SECURITY CRITICAL)
+# =========================================================
+
+  - name: "ssh_success"
+    regex: 'sshd\[\d+\]: Accepted password for (?P<user>\w+) from (?P<ip>[\d\.]+) port (?P<port>\d+)'
+    mapping:
+      user: "user.name"
+      ip: "source.ip"
+      port: "source.port"
+    static:
+      event.action: "login"
+      event.outcome: "success"
+
+  - name: "ssh_failed"
+    regex: 'sshd\[\d+\]: Failed password for (invalid user )?(?P<user>\w+) from (?P<ip>[\d\.]+)'
+    mapping:
+      user: "user.name"
+      ip: "source.ip"
+    static:
+      event.action: "login"
+      event.outcome: "failure"
+
+  - name: "ssh_invalid_user"
+    regex: 'sshd\[\d+\]: Invalid user (?P<user>\w+) from (?P<ip>[\d\.]+)'
+    mapping:
+      user: "user.name"
+      ip: "source.ip"
+    static:
+      event.action: "login"
+      event.outcome: "failure"
+      event.reason: "unknown_user"
+
+  - name: "ssh_failed_repeated"
+    regex: 'sshd\[\d+\]: message repeated (?P<count>\d+) times: \[ Failed password for (invalid user )?(?P<user>\w+) from (?P<ip>[\d\.]+)'
+    mapping:
+      user: "user.name"
+      ip: "source.ip"
+      count: "event.repeat_count|int"
+    static:
+      event.action: "login"
+      event.outcome: "failure"
+      event.reason: "repeat"
+
+  - name: "ssh_max_auth_attempts"
+    regex: 'sshd\[\d+\]: error: maximum authentication attempts exceeded for (?P<user>\w+) from (?P<ip>[\d\.]+)'
+    mapping:
+      user: "user.name"
+      ip: "source.ip"
+    static:
+      event.action: "login"
+      event.outcome: "failure"
+      event.reason: "max_auth_attempts"
+
+  - name: "ssh_pam_auth_failure"
+    regex: 'sshd\[\d+\]: pam_unix\(sshd:auth\): authentication failure;.*rhost=(?P<ip>[\d\.]+).*user=(?P<user>\w+)'
+    mapping:
+      user: "user.name"
+      ip: "source.ip"
+    static:
+      event.action: "login"
+      event.outcome: "failure"
+      event.reason: "pam_auth_failure"
+
+  - name: "ssh_pam_more_failures"
+    regex: 'sshd\[\d+\]: PAM (?P<count>\d+) more authentication failures;.*rhost=(?P<ip>[\d\.]+).*user=(?P<user>\w+)'
+    mapping:
+      user: "user.name"
+      ip: "source.ip"
+      count: "event.repeat_count|int"
+    static:
+      event.action: "login"
+      event.outcome: "failure"
+      event.reason: "pam_more_failures"
+
+  - name: "ssh_disconnect"
+    regex: 'sshd\[\d+\]: Received disconnect from (?P<ip>[\d\.]+) port (?P<port>\d+):(?P<reason_code>\d+): (?P<reason>.*)'
+    mapping:
+      ip: "source.ip"
+      port: "source.port"
+      reason_code: "event.code"
+      reason: "event.reason"
+    static:
+      event.action: "disconnect"
+
+  - name: "ssh_disconnected_user"
+    regex: 'sshd\[\d+\]: Disconnected from user (?P<user>\w+) (?P<ip>[\d\.]+) port (?P<port>\d+)'
+    mapping:
+      user: "user.name"
+      ip: "source.ip"
+      port: "source.port"
+    static:
+      event.action: "disconnect"
+
+  - name: "ssh_session_opened"
+    regex: 'sshd\[\d+\]: pam_unix\(sshd:session\): session opened for user (?P<user>\w+)\(uid=\d+\)'
+    mapping:
+      user: "user.name"
+    static:
+      event.category: "session"
+      event.type: "start"
+
+  - name: "ssh_session_closed"
+    regex: 'sshd\[\d+\]: pam_unix\(sshd:session\): session closed for user (?P<user>\w+)'
+    mapping:
+      user: "user.name"
+    static:
+      event.category: "session"
+      event.type: "end"
+
+# =========================================================
+# 2. SUDO (PRIVILEGE ESCALATION - HIGH PRIORITY)
+# =========================================================
+
+  - name: "sudo_not_in_sudoers"
+    regex: 'sudo:\s+(?P<user>\w+)\s+: user NOT in sudoers ; TTY=(?P<tty>[^;]+) ; PWD=(?P<pwd>[^;]+) ; USER=(?P<target>\w+) ; COMMAND=(?P<cmd>.*)'
+    mapping:
+      user: "user.name"
+      tty: "terminal.name"
+      pwd: "process.working_directory"
+      target: "user.target.name"
+      cmd: "process.command_line"
+    static:
+      event.action: "sudo"
+      event.outcome: "failure"
+      event.reason: "not_in_sudoers"
+
+  - name: "sudo_incorrect_password_attempts"
+    regex: 'sudo:\s+(?P<user>\w+)\s+: (?P<count>\d+) incorrect password attempts ; TTY=(?P<tty>[^;]+) ; PWD=(?P<pwd>[^;]+) ; USER=(?P<target>\w+) ; COMMAND=(?P<cmd>.*)'
+    mapping:
+      user: "user.name"
+      count: "event.repeat_count|int"
+      tty: "terminal.name"
+      pwd: "process.working_directory"
+      target: "user.target.name"
+      cmd: "process.command_line"
+    static:
+      event.action: "sudo"
+      event.outcome: "failure"
+      event.reason: "incorrect_password"
+
+  - name: "sudo_auth_failure"
+    regex: 'sudo: pam_unix\(sudo:auth\): authentication failure;.*user=(?P<user>\w+)'
+    mapping:
+      user: "user.name"
+    static:
+      event.action: "sudo_auth"
+      event.outcome: "failure"
+
+  - name: "sudo_password_identify_failed"
+    regex: 'sudo: pam_unix\(sudo:auth\): auth could not identify password for \[(?P<user>\w+)\]'
+    mapping:
+      user: "user.name"
+    static:
+      event.action: "sudo_auth"
+      event.outcome: "failure"
+      event.reason: "password_identify_failed"
+
+  - name: "sudo_conversation_failed"
+    regex: 'sudo: pam_unix\(sudo:auth\): conversation failed'
+    static:
+      event.action: "sudo_auth"
+      event.outcome: "failure"
+      event.reason: "conversation_failed"
+
+  - name: "sudo_run"
+    regex: 'sudo:\s+(?P<actor>\w+) : TTY=.*; USER=(?P<target>\w+) ; COMMAND=(?P<cmd>.*)'
+    mapping:
+      actor: "user.name"
+      target: "user.target.name"
+      cmd: "process.command_line"
+    static:
+      event.action: "elevation"
+
+# =========================================================
+# 3. SU (USER SWITCHING)
+# =========================================================
+  - name: "sudo_session_opened"
+    regex: 'sudo: pam_unix\(sudo:session\): session opened for user (?P<target>\w+)\(uid=\d+\) by (?P<user>\w+)\(uid=\d+\)'
+    mapping:
+      user: "user.name"
+      target: "user.target.name"
+    static:
+      event.category: "session"
+      event.type: "start"
+      event.action: "sudo_session"
+
+  - name: "sudo_session_closed"
+    regex: 'sudo: pam_unix\(sudo:session\): session closed for user (?P<target>\w+)'
+    mapping:
+      target: "user.target.name"
+    static:
+      event.category: "session"
+      event.type: "end"
+      event.action: "sudo_session"
+
+  - name: "su_failed"
+    regex: 'su\[\d+\]: FAILED SU \(to (?P<target>\w+)\) (?P<user>\w+) on (?P<tty>\S+)'
+    mapping:
+      user: "user.name"
+      target: "user.target.name"
+      tty: "terminal.name"
+    static:
+      event.action: "su"
+      event.outcome: "failure"
+
+  - name: "su_to_user"
+    regex: 'su\[\d+\]: \(to (?P<target>\w+)\) (?P<user>\w+) on (?P<tty>\S+)'
+    mapping:
+      user: "user.name"
+      target: "user.target.name"
+      tty: "terminal.name"
+    static:
+      event.action: "su_attempt"
+
+  - name: "su_session_opened"
+    regex: 'su\[\d+\]: pam_unix\(su-l:session\): session opened for user (?P<target>\w+)\(uid=\d+\) by (?P<user>\w+)\(uid=\d+\)'
+    mapping:
+      user: "user.name"
+      target: "user.target.name"
+    static:
+      event.action: "su"
+      event.outcome: "success"
+
+# =========================================================
+# 4. SYSTEM SESSIONS (logind, cron)
+# =========================================================
+
+  - name: "system_session_start"
+    regex: 'systemd-logind\[\d+\]: New session (?P<session_id>\d+) of user (?P<user>\w+)'
+    mapping:
+      session_id: "session.id"
+      user: "user.name"
+    static:
+      event.category: "session"
+      event.type: "start"
+
+  - name: "system_session_end"
+    regex: 'systemd-logind\[\d+\]: Removed session (?P<session_id>\d+)'
+    mapping:
+      session_id: "session.id"
+    static:
+      event.category: "session"
+      event.type: "end"
+
+  - name: "cron_session"
+    regex: 'CRON\[\d+\]: pam_unix\(cron:session\): session opened for user (?P<user>\w+)'
+    mapping:
+      user: "user.name"
+    static:
+      event.category: "cron"
+
+  - name: "cron_session_closed"
+    regex: 'CRON\[\d+\]: pam_unix\(cron:session\): session closed for user (?P<user>\w+)'
+    mapping:
+      user: "user.name"
+    static:
+      event.category: "cron"
+      event.type: "end"
+
+# =========================================================
+# 5. SYSTEM AUTH / POLICY / PASSWORD
+# =========================================================
+
+  - name: "passwd_changed"
+    regex: 'passwd\[\d+\]: password for ''(?P<user>\w+)'' changed by ''(?P<actor>\w+)'''
+    mapping:
+      user: "user.target.name"
+      actor: "user.name"
+    static:
+      event.action: "password_change"
+      event.outcome: "success"
+
+  - name: "polkit_auth_success"
+    regex: 'polkitd\[\d+\]: Operator of unix-process:\d+:\d+ successfully authenticated as unix-user:(?P<user>\w+) to gain .* for .* \[(?P<cmd>[^\]]+)\]'
+    mapping:
+      user: "user.name"
+      cmd: "process.command_line"
+    static:
+      event.action: "polkit_auth"
+      event.outcome: "success"
+
+  - name: "polkit_agent_registered"
+    regex: 'polkitd\[\d+\]: Registered Authentication Agent'
+    static:
+      event.action: "polkit_agent"
+      event.type: "start"
+
+  - name: "polkit_agent_unregistered"
+    regex: 'polkitd\[\d+\]: Unregistered Authentication Agent'
+    static:
+      event.action: "polkit_agent"
+      event.type: "end"

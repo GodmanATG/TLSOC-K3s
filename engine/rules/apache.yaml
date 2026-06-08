@@ -1,0 +1,21 @@
+pattern_name: "apache_access"
+
+strategy: "stateless"
+
+regex: '(?P<ip>[\d\.]+) - - \[(?P<timestamp>[^\]]+)\] "(?P<method>\w+) (?P<path>[^\?\s]+)(?:\?(?P<query>[^\s]+))? HTTP/(?P<http_version>[\d\.]+)" (?P<status>\d+) (?P<body_bytes>\d+) "(?P<referrer>[^"]*)" "(?P<user_agent>[^"]*)"'
+
+mapping:
+
+  # Source
+  ip: "source.ip"
+
+  # HTTP
+  method: "http.request.method"
+  status: "http.response.status_code|int"
+  body_bytes: "http.response.body.bytes|int"
+  user_agent: "user_agent.original"
+  referrer: "http.request.referrer"
+
+  # URL (New Structured Fields)
+  path: "url.path"
+  query: "url.query"

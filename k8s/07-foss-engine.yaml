@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: foss-engine
+  namespace: tlsoc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: foss-engine
+  template:
+    metadata:
+      labels:
+        app: foss-engine
+    spec:
+      containers:
+        - name: foss-engine
+          image: foss-soc-engine:latest
+          imagePullPolicy: Never
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          env:
+            - name: REDIS_HOST
+              value: "redis.tlsoc.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "test -f /app/logs/stats.json"]
+            failureThreshold: 6
+            periodSeconds: 15
+            initialDelaySeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  test -f /app/logs/stats.json &&
+                  test $(( $(date +%s) - $(date +%s -r /app/logs/stats.json) )) -lt 120
+            periodSeconds: 30
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  test -f /app/logs/stats.json &&
+                  test $(( $(date +%s) - $(date +%s -r /app/logs/stats.json) )) -lt 120
+            periodSeconds: 60
+            failureThreshold: 3
+            initialDelaySeconds: 120
+          volumeMounts:
+            - name: parser-output
+              mountPath: /var/log/soc_output
+            - name: engine-logs
+              mountPath: /app/logs
+            - name: engine-config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: parser-output
+          persistentVolumeClaim:
+            claimName: parser-output
+        - name: engine-logs
+          persistentVolumeClaim:
+            claimName: foss-engine-logs
+        - name: engine-config
+          configMap:
+            name: engine-config

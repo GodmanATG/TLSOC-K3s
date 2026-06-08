@@ -1,0 +1,66 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tlsoc-setup
+  namespace: tlsoc-ops
+spec:
+  backoffLimit: 15
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: tlsoc-setup
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: tlsoc-setup
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.19.12
+          command: ["bash", "/setup/init.sh"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          env:
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tlsoc-credentials
+                  key: ELASTIC_PASSWORD
+            - name: KIBANA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tlsoc-credentials
+                  key: KIBANA_PASSWORD
+          volumeMounts:
+            - name: setup-scripts
+              mountPath: /setup/init.sh
+              subPath: init.sh
+            - name: setup-files
+              mountPath: /setup/dashboards.ndjson
+              subPath: dashboards.ndjson
+            - name: setup-files
+              mountPath: /setup/rules.ndjson
+              subPath: rules.ndjson
+            - name: setup-files
+              mountPath: /setup/logo.png
+              subPath: logo.png
+            - name: tls-ca
+              mountPath: /certs/ca.crt
+              subPath: ca.crt
+      volumes:
+        - name: setup-scripts
+          configMap:
+            name: setup-scripts
+            defaultMode: 0755
+        - name: setup-files
+          configMap:
+            name: setup-files
+        - name: tls-ca
+          secret:
+            secretName: tlsoc-tls-certs
+            items:
+              - key: ca.crt
+                path: ca.crt
