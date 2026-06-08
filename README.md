@@ -54,7 +54,7 @@ Everything is self-contained. No files need to be fetched from TLSOC-Aryan.
 
 ---
 
-# OPTION A — Windows + WSL (Your Current Setup)
+# OPTION A — Windows + WSL 
 
 This is the path for you. k3s runs inside WSL, you control everything from PowerShell or the WSL terminal.
 
@@ -217,15 +217,13 @@ Click the **TLSOC** space tile after login.
 
 ---
 
-# OPTION B — Native Ubuntu (For the Demo Laptops)
-
-This is the path for the 3-laptop live demo. Each laptop runs Ubuntu natively.
+# OPTION B — Native Ubuntu 
 
 ## Laptop 1 — Control Plane (Do This First)
 
 ```bash
 # 1. Clone or copy TLSOC-K3s to the laptop
-git clone <your-repo-url>
+git clone https://github.com/GodmanATG/TLSOC-K3s
 cd TLSOC-K3s
 
 # 2. Install Docker
