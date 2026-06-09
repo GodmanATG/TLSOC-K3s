@@ -106,7 +106,10 @@ echo "   → Kibana (Deployment + Ingress)"
 kubectl apply -f k8s/09-kibana.yaml
 
 echo "   → RBAC"
-kubectl apply -f k8s/11-rbac.yaml
+kubectl apply -f k8s/13-rbac.yaml
+
+echo "   → HPA (Autoscaling)"
+kubectl apply -f k8s/10-hpa.yaml
 echo ""
 
 # ─── Step 4: Create setup-files ConfigMap ──────────────────────
@@ -146,7 +149,7 @@ echo "${YELLOW}[7/8] Running Setup Job (configures Kibana space, dashboards, SIE
 # Delete any previous setup job
 kubectl delete job tlsoc-setup -n tlsoc-ops 2>/dev/null || true
 
-kubectl apply -f k8s/10-setup-job.yaml
+kubectl apply -f k8s/12-setup-job.yaml
 echo "   Watching setup logs (Ctrl+C when you see 'TLSOC IS READY')..."
 echo ""
 
