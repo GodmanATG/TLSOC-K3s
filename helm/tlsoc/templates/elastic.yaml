@@ -1,0 +1,80 @@
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: tlsoc
+  namespace: tlsoc
+spec:
+  version: 8.19.12
+  nodeSets:
+  - name: default
+    count: 1
+    config:
+      node.store.allow_mmap: false
+    podTemplate:
+      spec:
+        containers:
+        - name: elasticsearch
+          resources:
+            requests:
+              memory: {{ .Values.elasticsearch.resources.requests.memory | quote }}
+              cpu: {{ .Values.elasticsearch.resources.requests.cpu | quote }}
+            limits:
+              memory: {{ .Values.elasticsearch.resources.limits.memory | quote }}
+              cpu: {{ .Values.elasticsearch.resources.limits.cpu | quote }}
+    volumeClaimTemplates:
+    - metadata:
+        name: elasticsearch-data
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.elasticsearch.storage | quote }}
+        storageClassName: local-path
+---
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: tlsoc
+  namespace: tlsoc
+spec:
+  version: 8.19.12
+  count: 1
+  elasticsearchRef:
+    name: tlsoc
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: true
+  podTemplate:
+    spec:
+      containers:
+      - name: kibana
+        resources:
+          requests:
+            memory: {{ .Values.kibana.resources.requests.memory | quote }}
+            cpu: {{ .Values.kibana.resources.requests.cpu | quote }}
+          limits:
+            memory: {{ .Values.kibana.resources.limits.memory | quote }}
+            cpu: {{ .Values.kibana.resources.limits.cpu | quote }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kibana-ingress
+  namespace: tlsoc
+  annotations:
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: kibana.tlsoc.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tlsoc-kb-http
+                port:
+                  number: 5601

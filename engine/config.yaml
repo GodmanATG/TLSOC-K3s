@@ -3,7 +3,7 @@ kafka:
   # CONNECTION SETTINGS
   # -------------------------------------------------------------------------
   # Replace with your Kafka IP and Port
-  bootstrap_servers: ["192.168.10.57:9094"]
+  bootstrap_servers: ["<YOUR_KAFKA_IP>:9094"]
 
   # -------------------------------------------------------------------------
   # TOPIC SELECTION

@@ -17,6 +17,8 @@ data:
   logstash.yml: |
     xpack.monitoring.enabled: false
     http.host: "0.0.0.0"
+    pipeline.batch.size: 2000
+    pipeline.workers: 4
 
   pipelines.yml: |
     - pipeline.id: logs
@@ -26,8 +28,8 @@ data:
     input {
       file {
         path => "/parser_output/*.json"
-        start_position => "end"
-        sincedb_path => "/usr/share/logstash/data/sincedb"
+        start_position => "beginning"
+        sincedb_path => "/usr/share/logstash/state/.sincedb"
         codec => json
         mode => "tail"
       }
@@ -42,7 +44,7 @@ data:
     }
     output {
       elasticsearch {
-        hosts => ["https://elasticsearch:9200"]
+        hosts => ["https://tlsoc-es-http.tlsoc.svc:9200"]
         cacert => "/usr/share/logstash/config/certs/ca.crt"
         user => "elastic"
         password => "${ELASTIC_PASSWORD}"
@@ -58,7 +60,8 @@ metadata:
   namespace: tlsoc
 data:
   # ⚠️  Update to your WSL/machine IP — run: hostname -I | awk '{print $1}'
-  KAFKA_ADVERTISED_HOST: "10.51.29.64"
+  # ⚠️ Replace with your machine's IP: hostname -I | awk '{print $1}'
+  KAFKA_ADVERTISED_HOST: "<YOUR_MACHINE_IP>"
 
 ---
 apiVersion: v1
@@ -69,10 +72,12 @@ metadata:
 data:
   config.yaml: |
     kafka:
-      bootstrap_servers: ["192.168.10.57:9094"]
+      # Use local Kafka: kafka.tlsoc.svc.cluster.local:9092
+      # Or external Kafka: <EXTERNAL_KAFKA_IP>:9094
+      bootstrap_servers: ["kafka.tlsoc.svc.cluster.local:9092"]
       input_topic: "^(webserver|vulnerability|mailserver|proxyserver|summersoc|.*)$"
       group_id: "foss-soc-engine"
-      auto_offset_reset: "earliest"
+      auto_offset_reset: "latest"
     batch:
       size: 1000
       timeout_sec: 5
@@ -102,13 +107,13 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: setup-scripts
-  namespace: tlsoc-ops
+  namespace: tlsoc
 data:
   init.sh: |
     #!/bin/bash
     set -e
-    ES="https://elasticsearch.tlsoc.svc.cluster.local:9200"
-    KB="https://kibana.tlsoc.svc.cluster.local:5601"
+    ES="https://tlsoc-es-http.tlsoc.svc:9200"
+    KB="http://tlsoc-kb-http.tlsoc.svc:5601"
     CA="--cacert /certs/ca.crt"
     AUTH="-u elastic:${ELASTIC_PASSWORD}"
 
@@ -118,12 +123,6 @@ data:
       sleep 5
     done
     echo "✅ Elasticsearch is up!"
-
-    echo "🔐 Setting kibana_system password..."
-    curl -sk -X POST $AUTH $CA -H "Content-Type: application/json" \
-      "$ES/_security/user/kibana_system/_password" \
-      -d "{\"password\":\"${KIBANA_PASSWORD}\"}"
-    echo -e "\n✅ Password set!"
 
     echo "⏳ Waiting for Kibana..."
     until curl -sk -I $AUTH $CA "$KB/api/status" | grep -q "200"; do

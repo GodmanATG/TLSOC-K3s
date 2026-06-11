@@ -1,5 +1,6 @@
 # Auto-generated secrets with real cert data — never commit
 k8s/01-secrets.yaml
+certs/
 
 # Python bytecode
 __pycache__/

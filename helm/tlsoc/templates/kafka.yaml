@@ -51,7 +51,7 @@ metadata:
   namespace: tlsoc
 spec:
   serviceName: kafka-headless
-  replicas: 1
+  replicas: {{ .Values.kafka.replicas }}
   selector:
     matchLabels:
       app: kafka
@@ -114,28 +114,19 @@ spec:
             - containerPort: 9094
               name: external
           startupProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>/dev/null && echo ok"
-            failureThreshold: 12
+            tcpSocket:
+              port: 9092
+            failureThreshold: 30
             periodSeconds: 10
             initialDelaySeconds: 15
           readinessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>/dev/null && echo ok"
+            tcpSocket:
+              port: 9092
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>/dev/null && echo ok"
+            tcpSocket:
+              port: 9092
             periodSeconds: 30
             failureThreshold: 3
             initialDelaySeconds: 60

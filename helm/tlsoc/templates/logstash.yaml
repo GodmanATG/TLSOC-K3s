@@ -4,7 +4,7 @@ metadata:
   name: logstash
   namespace: tlsoc
 spec:
-  replicas: 1
+  replicas: {{ .Values.logstash.replicas }}
   selector:
     matchLabels:
       app: logstash
@@ -18,17 +18,17 @@ spec:
           image: docker.elastic.co/logstash/logstash:8.19.12
           resources:
             requests:
-              cpu: "250m"
-              memory: "512Mi"
+              cpu: {{ .Values.logstash.resources.requests.cpu | quote }}
+              memory: {{ .Values.logstash.resources.requests.memory | quote }}
             limits:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: {{ .Values.logstash.resources.limits.cpu | quote }}
+              memory: {{ .Values.logstash.resources.limits.memory | quote }}
           env:
             - name: ELASTIC_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: tlsoc-credentials
-                  key: ELASTIC_PASSWORD
+                  name: tlsoc-es-elastic-user
+                  key: elastic
           startupProbe:
             httpGet:
               path: /
@@ -71,6 +71,8 @@ spec:
             - name: parser-output
               mountPath: /parser_output
               readOnly: true
+            - name: logstash-state
+              mountPath: /usr/share/logstash/state
       volumes:
         - name: logstash-pipeline
           configMap:
@@ -80,8 +82,11 @@ spec:
             name: logstash-config
         - name: tls-certs
           secret:
-            secretName: tlsoc-tls-certs
+            secretName: tlsoc-es-http-certs-public
         - name: parser-output
           persistentVolumeClaim:
             claimName: parser-output
             readOnly: true
+        - name: logstash-state
+          persistentVolumeClaim:
+            claimName: logstash-state

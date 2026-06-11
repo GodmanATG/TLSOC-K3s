@@ -4,7 +4,7 @@ metadata:
   name: foss-engine
   namespace: tlsoc
 spec:
-  replicas: 1
+  replicas: {{ .Values.foss_engine.replicas }}
   selector:
     matchLabels:
       app: foss-engine
@@ -19,11 +19,11 @@ spec:
           imagePullPolicy: Never
           resources:
             requests:
-              cpu: "200m"
-              memory: "256Mi"
+              cpu: {{ .Values.foss_engine.resources.requests.cpu | quote }}
+              memory: {{ .Values.foss_engine.resources.requests.memory | quote }}
             limits:
-              cpu: "500m"
-              memory: "512Mi"
+              cpu: {{ .Values.foss_engine.resources.limits.cpu | quote }}
+              memory: {{ .Values.foss_engine.resources.limits.memory | quote }}
           env:
             - name: REDIS_HOST
               value: "redis.tlsoc.svc.cluster.local"

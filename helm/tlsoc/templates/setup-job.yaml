@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: tlsoc-setup
-  namespace: tlsoc-ops
+  namespace: tlsoc
 spec:
   backoffLimit: 15
   ttlSecondsAfterFinished: 3600
@@ -27,13 +27,9 @@ spec:
             - name: ELASTIC_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: tlsoc-credentials
-                  key: ELASTIC_PASSWORD
-            - name: KIBANA_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: tlsoc-credentials
-                  key: KIBANA_PASSWORD
+                  name: tlsoc-es-elastic-user
+                  key: elastic
+
           volumeMounts:
             - name: setup-scripts
               mountPath: /setup/init.sh
@@ -60,7 +56,7 @@ spec:
             name: setup-files
         - name: tls-ca
           secret:
-            secretName: tlsoc-tls-certs
+            secretName: tlsoc-es-http-certs-public
             items:
               - key: ca.crt
                 path: ca.crt
