@@ -28,7 +28,7 @@ logstash:
       cpu: "500m"
 
 foss_engine:
-  replicas: 3
+  replicas: 1
   resources:
     requests:
       memory: "256Mi"

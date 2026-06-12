@@ -10,6 +10,13 @@ spec:
     name: logstash
   minReplicas: 1
   maxReplicas: 3
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 120
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
   metrics:
   - type: Resource
     resource:
@@ -31,6 +38,13 @@ spec:
     name: foss-engine
   minReplicas: 1
   maxReplicas: 3
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 120
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
   metrics:
   - type: Resource
     resource:
