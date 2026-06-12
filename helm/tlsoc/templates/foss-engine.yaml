@@ -41,8 +41,7 @@ spec:
                 - sh
                 - -c
                 - |
-                  test -f /app/logs/stats.json &&
-                  test $(( $(date +%s) - $(date +%s -r /app/logs/stats.json) )) -lt 120
+                  test -f /app/logs/stats.json
             periodSeconds: 30
             failureThreshold: 3
           livenessProbe:
@@ -51,8 +50,7 @@ spec:
                 - sh
                 - -c
                 - |
-                  test -f /app/logs/stats.json &&
-                  test $(( $(date +%s) - $(date +%s -r /app/logs/stats.json) )) -lt 120
+                  test -f /app/logs/stats.json
             periodSeconds: 60
             failureThreshold: 3
             initialDelaySeconds: 120
