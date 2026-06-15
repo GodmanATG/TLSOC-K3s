@@ -8,8 +8,8 @@ metadata:
   namespace: tlsoc
 spec:
   accessModes:
-    - ReadWriteOnce
-  storageClassName: "local-path"
+    - ReadWriteMany
+  storageClassName: "longhorn"
   resources:
     requests:
       storage: 5Gi
@@ -22,8 +22,8 @@ metadata:
   namespace: tlsoc
 spec:
   accessModes:
-    - ReadWriteOnce
-  storageClassName: "local-path"
+    - ReadWriteMany
+  storageClassName: "longhorn"
   resources:
     requests:
       storage: 2Gi
@@ -36,8 +36,8 @@ metadata:
   namespace: tlsoc
 spec:
   accessModes:
-    - ReadWriteOnce
-  storageClassName: "local-path"
+    - ReadWriteMany
+  storageClassName: "longhorn"
   resources:
     requests:
       storage: 500Mi

@@ -11,6 +11,7 @@ from logging.handlers import RotatingFileHandler
 from kafka import KafkaConsumer
 from core.schema import LogInput
 from core.registry import RuleRegistry
+import signal
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -165,6 +166,10 @@ def flush_batch(batch):
             logger.error(f"Batch write failed for {module}: {e}")
 
 def main():
+    def sigterm_handler(signum, frame):
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGTERM, sigterm_handler)
+
     try:
         consumer = KafkaConsumer(
             bootstrap_servers=config["kafka"]["bootstrap_servers"],

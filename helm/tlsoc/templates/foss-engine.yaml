@@ -16,7 +16,7 @@ spec:
       containers:
         - name: foss-engine
           image: foss-soc-engine:latest
-          imagePullPolicy: Never
+          imagePullPolicy: IfNotPresent
           resources:
             requests:
               cpu: {{ .Values.foss_engine.resources.requests.cpu | quote }}
@@ -29,31 +29,6 @@ spec:
               value: "redis.tlsoc.svc.cluster.local"
             - name: REDIS_PORT
               value: "6379"
-          startupProbe:
-            exec:
-              command: ["sh", "-c", "test -f /app/logs/stats.json"]
-            failureThreshold: 6
-            periodSeconds: 15
-            initialDelaySeconds: 10
-          readinessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - |
-                  test -f /app/logs/stats.json
-            periodSeconds: 30
-            failureThreshold: 3
-          livenessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - |
-                  test -f /app/logs/stats.json
-            periodSeconds: 60
-            failureThreshold: 3
-            initialDelaySeconds: 120
           volumeMounts:
             - name: parser-output
               mountPath: /var/log/soc_output
