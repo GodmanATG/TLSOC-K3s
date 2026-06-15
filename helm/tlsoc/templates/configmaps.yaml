@@ -145,12 +145,12 @@ data:
     echo -e "\n✅ Data Views created!"
 
     echo "📥 Importing Dashboards..."
-    curl -sk -X POST "$KB/s/tlsoc/api/saved_objects/_import?overwrite=true" \
+    curl -sk -X POST "$KB/s/tlsoc/api/saved_objects/_import" \
       -H "kbn-xsrf: true" $AUTH $CA --form file=@/setup/dashboards.ndjson
     echo -e "\n✅ Dashboards imported!"
 
     echo "📥 Importing SIEM Rules..."
-    curl -sk -X POST "$KB/s/tlsoc/api/detection_engine/rules/_import?overwrite=true" \
+    curl -sk -X POST "$KB/s/tlsoc/api/detection_engine/rules/_import" \
       -H "kbn-xsrf: true" $AUTH $CA --form file=@/setup/rules.ndjson
     echo -e "\n✅ SIEM Rules imported!"
 
