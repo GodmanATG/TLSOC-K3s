@@ -66,6 +66,13 @@ spec:
         - key: "node-role.kubernetes.io/control-plane"
           operator: "Exists"
           effect: "NoSchedule"
+      initContainers:
+        - name: fix-permissions
+          image: busybox
+          command: ["sh", "-c", "chown -R 1000:1000 /var/lib/kafka/data && rm -rf /var/lib/kafka/data/lost+found"]
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
       containers:
         - name: kafka
           image: apache/kafka:4.0.0
@@ -138,7 +145,7 @@ spec:
         name: kafka-data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: "local-path"
+        storageClassName: "longhorn"
         resources:
           requests:
             storage: 2Gi
