@@ -40,7 +40,7 @@ Logstash operates under a strict Zero-Trust model. The `/parser_output` volume c
 Because Elasticsearch and Java applications require significant memory, we have tuned the default `values.yaml` limits to run on a standard developer laptop without crashing.
 
 ### Minimum Specs (Development & Testing)
-* **OS:** Linux (Ubuntu 22.04+ recommended) or WSL2
+* **OS:** Linux (Ubuntu 22.04+ recommended)
 * **RAM:** 8 GB (Elasticsearch requires a minimum 2GB heap, plus OS overhead)
 * **CPU:** 4 Cores
 * **Storage:** 20 GB free space
@@ -60,7 +60,6 @@ Because Elasticsearch and Java applications require significant memory, we have 
 > - If deploying a multi-node cluster, ensure all machines are connected to the **same physical network or VPN**, and can `ping` each other successfully.
 > - Verify that K3s is fully started **before** deploying the Helm chart: `sudo systemctl status k3s`
 > - Verify Kubernetes is responsive: `kubectl get nodes` should show your node as `Ready`.
-> - If using WSL2, ensure Docker Desktop is **not** running — it conflicts with K3s networking.
 
 ### Step 1 — Prerequisites
 Ensure Docker and Helm are installed on your Linux machine.
@@ -789,21 +788,14 @@ sudo chown $(whoami):$(whoami) ~/.kube/config
 export KUBECONFIG=~/.kube/config
 ```
 
-### 3. WSL2 Crash: `Failed to start ContainerManager...`
-**Why:** Windows Subsystem for Linux (WSL2) handles `cgroups` differently from a native Linux kernel.
-**The Fix:** Tell K3s to use the `systemd` cgroup driver:
-```bash
-sudo k3s server --kubelet-arg="--cgroup-driver=systemd"
-```
-
-### 4. Pods stuck in `Terminating` forever
+### 3. Pods stuck in `Terminating` forever
 **Why:** A node hard-crashed or the storage volume got forcefully detached.
 **The Fix:** Force delete the pod:
 ```bash
 kubectl delete pod <pod-name> -n tlsoc --grace-period=0 --force
 ```
 
-### 5. FOSS-Engine pod in `ErrImageNeverPull` or `ImagePullBackOff`
+### 4. FOSS-Engine pod in `ErrImageNeverPull` or `ImagePullBackOff`
 **Why:** The `foss-soc-engine:latest` Docker image is not on Docker Hub. It must be built locally on every node that runs the engine. The image was either not built or not imported into K3s.
 **The Fix:**
 ```bash
@@ -811,21 +803,21 @@ sudo docker build -t foss-soc-engine:latest ./engine
 sudo docker save foss-soc-engine:latest | sudo k3s ctr images import -
 ```
 
-### 6. FOSS-Engine not parsing logs / "No Kafka brokers available"
+### 5. FOSS-Engine not parsing logs / "No Kafka brokers available"
 **Why:** The bootstrap server in the engine's ConfigMap doesn't match your Kafka deployment, or Kafka hasn't finished starting.
 **The Fix:**
 1. Verify Kafka is running: `kubectl get pods -l app=kafka -n tlsoc`
 2. Check the engine ConfigMap: `kubectl get configmap engine-config -n tlsoc -o yaml`. The `bootstrap_servers` should be `kafka.tlsoc.svc.cluster.local:9092` for in-cluster communication.
 3. Restart the engine: `kubectl rollout restart deployment foss-engine -n tlsoc`
 
-### 7. Logstash not shipping logs to Elasticsearch
+### 6. Logstash not shipping logs to Elasticsearch
 **Why:** Logstash can't reach Elasticsearch, the TLS certificate is wrong, or the Elastic password changed.
 **The Fix:**
 1. Check Logstash logs for errors: `kubectl logs -l app=logstash -n tlsoc --tail=100`
 2. Verify the ES secret exists: `kubectl get secret tlsoc-es-elastic-user -n tlsoc`
 3. Restart Logstash: `kubectl rollout restart deployment logstash -n tlsoc`
 
-### 8. Elasticsearch pod stuck in `CrashLoopBackOff`
+### 7. Elasticsearch pod stuck in `CrashLoopBackOff`
 **Why:** Elasticsearch ran out of memory (OOM killed), or the disk is full, or the `vm.max_map_count` kernel parameter is too low.
 **The Fix:**
 ```bash
@@ -838,7 +830,7 @@ sudo sysctl -w vm.max_map_count=262144
 echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
 ```
 
-### 9. Kafka pod in `CrashLoopBackOff`
+### 8. Kafka pod in `CrashLoopBackOff`
 **Why:** Usually caused by corrupted KRaft metadata or a Kafka version mismatch after upgrade.
 **The Fix:**
 ```bash
@@ -850,7 +842,7 @@ kubectl delete pvc kafka-data-kafka-0 -n tlsoc
 kubectl delete pod kafka-0 -n tlsoc
 ```
 
-### 10. HPA not scaling (always shows `<unknown>` for CPU)
+### 9. HPA not scaling (always shows `<unknown>` for CPU)
 **Why:** The K3s Metrics Server is not deployed or not responding.
 **The Fix:**
 ```bash
@@ -864,11 +856,27 @@ sudo systemctl restart k3s
 kubectl top pods -n tlsoc
 ```
 
-### 13. KEDA shows `error describing topics: kafka server: topic does not exist`
+### 10. Longhorn Volumes stuck in "Degraded"
+**Why:** A node was removed or went offline, and Longhorn lost a replica.
+**The Fix:** Open the Longhorn UI, click the volume, and delete the dead replica. If `Default Replica Count` is higher than the number of healthy nodes, reduce it.
+
+### 11. PVC stuck in `Pending` state
+**Why:** No StorageClass can satisfy the claim, or Longhorn is not installed.
+**The Fix:**
+```bash
+# Check available StorageClasses
+kubectl get storageclass
+
+# If "longhorn" is missing, install Longhorn (see Step 3)
+# If using local-path, ensure the PVC uses storageClassName: "local-path"
+kubectl describe pvc <pvc-name> -n tlsoc
+```
+
+### 12. KEDA shows `error describing topics: kafka server: topic does not exist`
 **Why:** This is expected and harmless. Kafka only creates a topic the moment the first log is sent to it. If no logs are flowing, the topic doesn't exist yet, so KEDA can't measure lag on it. It will resolve automatically when your target machines start sending logs.
 **It is NOT an error** — just a warning that KEDA is idle.
 
-### 14. KEDA ScaledObject shows `Ready: False` / `TriggerError`
+### 13. KEDA ScaledObject shows `Ready: False` / `TriggerError`
 **Why:** KEDA cannot connect to the Kafka broker at `<EXTERNAL_KAFKA_IP>:9094`.
 **The Fix:**
 ```bash
@@ -883,7 +891,7 @@ nc -zv <EXTERNAL_KAFKA_IP> 9094
 # And: advertised.listeners=EXTERNAL://<EXTERNAL_KAFKA_IP>:9094
 ```
 
-### 15. KEDA scales to 3 FOSS-Engine pods but log processing doesn't speed up
+### 14. KEDA scales to 3 FOSS-Engine pods but log processing doesn't speed up
 **Why:** Your Kafka topics only have 1 partition. Kafka assigns partitions to consumers 1:1. With 1 partition, only 1 pod can receive messages regardless of how many pods exist.
 **The Fix:** Increase partitions on your Kafka broker machine:
 ```bash
@@ -898,7 +906,7 @@ kafka-topics.sh --describe --topic summersoc --bootstrap-server localhost:9092
 ```
 > **Note:** You cannot decrease partition count after setting it. Only increase.
 
-### 16. VPA not generating recommendations after 15+ minutes
+### 15. VPA not generating recommendations after 15+ minutes
 **Why:** VPA needs live metric data from the Metrics Server to generate recommendations. If the Metrics Server is down, or the pod has been restarted very recently, VPA has no data.
 **The Fix:**
 ```bash
@@ -912,7 +920,7 @@ kubectl top pods -n tlsoc
 kubectl describe vpa elasticsearch-vpa -n tlsoc
 ```
 
-### 17. Elasticsearch fills its disk and stops indexing
+### 16. Elasticsearch fills its disk and stops indexing
 **Why:** By default, Elasticsearch enters read-only mode when the disk reaches 95% full. New logs from Logstash will be rejected.
 **The Fix:**
 ```bash
@@ -930,7 +938,7 @@ kubectl exec -n tlsoc tlsoc-es-default-0 -- curl -s -u elastic:$PASSWORD \
 # (Longhorn supports online PVC expansion without downtime)
 ```
 
-### 18. After upgrading Elasticsearch (ECK), Logstash stops shipping logs
+### 17. After upgrading Elasticsearch (ECK), Logstash stops shipping logs
 **Why:** ECK rotates internal TLS certificates when the Elasticsearch cluster is recreated or upgraded. Logstash's pod still holds the old CA certificate in memory.
 **The Fix:** Roll the Logstash deployment to force it to mount the new certificate:
 ```bash
@@ -939,22 +947,6 @@ kubectl rollout restart deployment logstash -n tlsoc
 # If Logstash is still not shipping (missed logs during downtime), wipe its position tracker:
 kubectl exec -n tlsoc deploy/logstash -- find /usr/share/logstash/state -name '.sincedb*' -delete
 kubectl rollout restart deployment logstash -n tlsoc
-```
-
-### 11. Longhorn Volumes stuck in "Degraded"
-**Why:** A node was removed or went offline, and Longhorn lost a replica.
-**The Fix:** Open the Longhorn UI, click the volume, and delete the dead replica. If `Default Replica Count` is higher than the number of healthy nodes, reduce it.
-
-### 12. PVC stuck in `Pending` state
-**Why:** No StorageClass can satisfy the claim, or Longhorn is not installed.
-**The Fix:**
-```bash
-# Check available StorageClasses
-kubectl get storageclass
-
-# If "longhorn" is missing, install Longhorn (see Step 3)
-# If using local-path, ensure the PVC uses storageClassName: "local-path"
-kubectl describe pvc <pvc-name> -n tlsoc
 ```
 
 ---
@@ -966,15 +958,15 @@ Instead of relying entirely on terminal commands, you can use **OpenLens** (a po
 ### What it does:
 OpenLens allows you to graphically see all your pods, view live scrolling logs, access terminal shells inside containers, and monitor CPU/RAM usage across your FOSS-Engine and Logstash deployments in real-time.
 
-### How to Connect OpenLens to your WSL2 K3s Cluster:
-If you are running K3s inside WSL2 on Windows, OpenLens runs on your host Windows machine. You need to pull the configuration out of WSL and point OpenLens to it.
-
-1. Open a **Windows PowerShell** terminal (not Ubuntu).
-2. Run this command to copy the K3s config to your Windows profile and point it to localhost:
-```powershell
-wsl -d <YOUR_WSL_DISTRO> -e bash -c "sudo cp /etc/rancher/k3s/k3s.yaml /mnt/c/Users/<YOUR_WINDOWS_USERNAME>/.kube/config; sudo chmod 644 /mnt/c/Users/<YOUR_WINDOWS_USERNAME>/.kube/config; sed -i 's/127.0.0.1/localhost/g' /mnt/c/Users/<YOUR_WINDOWS_USERNAME>/.kube/config"
+### How to Install and Connect OpenLens on Ubuntu:
+1. Download the OpenLens AppImage for Linux from the official GitHub releases.
+2. Make it executable and run it:
+```bash
+chmod +x OpenLens-*.AppImage
+./OpenLens-*.AppImage
 ```
-3. Open the **OpenLens** application on Windows. It will automatically connect!
+3. OpenLens will automatically detect your K3s configuration if it is located at `~/.kube/config` (as set up in Step 2 of the Installation Guide).
+4. You can now visually monitor the cluster, scale deployments, and view live logs directly from the OpenLens GUI.
 
 ---
 
