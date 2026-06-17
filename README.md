@@ -29,7 +29,9 @@ Logstash operates under a strict Zero-Trust model. The `/parser_output` volume c
 | **ECK Operator** | Database Management | The official Elastic Kubernetes Operator automatically handles Elasticsearch cluster formation, auto-healing dead nodes, generating secure passwords, and provisioning internal TLS certificates seamlessly. |
 | **Kafka & Redis** | Data Brokering | Kafka acts as an ultra-fast shock absorber. If 50,000 logs arrive instantly during a DDoS attack, Kafka holds them in a queue so the FOSS-Engine isn't overwhelmed. Redis handles high-speed caching for IP Geolocation. |
 | **Traefik** | Ingress Routing | Replaces `port-forwarding`. Traefik intercepts incoming web traffic, cleanly terminates HTTPS SSL certificates, and routes you directly to Kibana at `kibana.tlsoc.local`. |
-| **HPA** | Auto-Scaling | The Horizontal Pod Autoscaler monitors CPU usage of FOSS-Engine and Logstash. When CPU exceeds 70%, it automatically spins up additional pods (up to 3) to absorb the load, then scales back down after 5 minutes of calm. |
+| **HPA** | CPU-Based Auto-Scaling | Monitors CPU usage of Logstash. When CPU exceeds 70%, it automatically spins up additional Logstash pods (up to 3) to absorb heavy log file load, then scales back down when idle. |
+| **KEDA** | Event-Driven Auto-Scaling | Scales the FOSS-Engine based on real Kafka consumer lag. When thousands of unread logs pile up on the Kafka broker, KEDA spins up more FOSS-Engine pods to burn through the backlog instantly. Far more precise than CPU-based scaling for queue-driven workloads. |
+| **VPA** | Vertical Resource Tuning | Watches all 6 services in observation mode and generates mathematically perfect CPU/RAM recommendations based on actual historical usage. Use its output to tune `values.yaml` and prevent OOM-kills or resource starvation. |
 
 ---
 
@@ -120,7 +122,36 @@ helm repo update
 helm upgrade --install elastic-operator elastic/eck-operator -n elastic-system --create-namespace
 ```
 
-### Step 5 — Build the FOSS-SOC Engine Docker Image
+### Step 5 — Install KEDA (Event-Driven Autoscaler)
+KEDA scales the FOSS-Engine based on Kafka consumer lag instead of CPU. It watches your Kafka broker and automatically spins up more FOSS-Engine pods when logs pile up.
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+helm repo update
+helm install keda kedacore/keda --namespace keda --create-namespace
+
+# Verify KEDA pods are running (should show 3 pods: operator, metrics-apiserver, admission-webhooks)
+kubectl get pods -n keda
+```
+
+> **Note:** After installing KEDA, open `helm/tlsoc/templates/keda.yaml` and replace `<EXTERNAL_KAFKA_IP>` with the IP address of your Kafka broker machine. This is the machine that your target servers send logs to (not the K3s master).
+
+### Step 6 — Install VPA (Vertical Pod Autoscaler)
+VPA silently monitors all 6 services and generates ideal CPU/RAM recommendations without ever restarting your pods (it's in observation mode).
+```bash
+# Clone the official Kubernetes autoscaler repository
+git clone https://github.com/kubernetes/autoscaler.git /tmp/autoscaler
+
+# Run the official VPA installer
+cd /tmp/autoscaler/vertical-pod-autoscaler
+sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml ./hack/vpa-up.sh
+
+# Verify VPA pods are running (should show 3 pods: recommender, updater, admission-controller)
+kubectl get pods -n kube-system | grep vpa
+```
+
+> **Note:** VPA stores its data in `kube-system`. After installing, deploy the Helm chart (next step) and wait 10-15 minutes. VPA will then start generating resource recommendations for your pods.
+
+### Step 7 — Build the FOSS-SOC Engine Docker Image
 The FOSS-SOC Engine is **not** available on Docker Hub. You must build it locally from the source code in the `engine/` directory. This image must be built on **every machine** that will run FOSS-Engine pods (the Master node and all Worker nodes).
 
 ```bash
@@ -144,7 +175,7 @@ sudo docker build -t foss-soc-engine:latest \
 > ```
 > Run this command every time you rebuild the FOSS-Engine image!
 
-### Step 6 — Configure & Deploy TLSOC via Helm
+### Step 8 — Configure & Deploy TLSOC via Helm
 Before deploying, you **must** set your machine's IP address in the Kafka configuration.
 ```bash
 # Get your machine's IP
@@ -358,6 +389,213 @@ To restrict how much storage Longhorn can use on a specific laptop:
 
 ---
 
+## ⚖️ Autoscaling Deep Dive (HPA, KEDA & VPA)
+
+TLSOC uses three complementary autoscaling technologies. Each solves a different problem.
+
+### HPA — Horizontal Pod Autoscaler (for Logstash)
+
+HPA watches CPU usage. When Logstash's CPU exceeds the threshold, it adds more Logstash pods. Logstash reads from the filesystem (`/parser_output`), so CPU is the correct signal — there's no queue lag to measure.
+
+```bash
+# See current HPA status (shows current CPU vs target)
+kubectl get hpa -n tlsoc
+
+# See detailed scaling history and events
+kubectl describe hpa logstash-hpa -n tlsoc
+```
+
+| Setting in `hpa.yaml` | Default | Effect |
+|---|---|---|
+| `minReplicas` | `1` | Never scale below 1 pod |
+| `maxReplicas` | `3` | Never scale above 3 pods |
+| `averageUtilization` | `70` | Scale up when CPU exceeds 70% |
+| `stabilizationWindowSeconds` | `120` | Wait 2 minutes after a scale-up before scaling again |
+
+### KEDA — Kafka Event-Driven Autoscaling (for FOSS-Engine)
+
+KEDA connects directly to your Kafka broker and counts how many messages are sitting unread in the consumer group (`foss-soc-engine`). When lag exceeds the threshold, KEDA adds FOSS-Engine pods. When the backlog clears, it scales back down. This is far more precise than CPU — a log flood triggers scaling before CPU even spikes.
+
+```bash
+# See KEDA ScaledObject status
+kubectl get scaledobject -n tlsoc
+
+# See detailed KEDA events (connection status, scaling decisions)
+kubectl describe scaledobject foss-engine-scaler -n tlsoc
+
+# See the internal HPA KEDA manages behind the scenes
+kubectl get hpa -n tlsoc
+```
+
+| Setting in `keda.yaml` | Default | Effect |
+|---|---|---|
+| `minReplicaCount` | `1` | Minimum FOSS-Engine pods. Set to `0` to scale to zero when no logs flow. |
+| `maxReplicaCount` | `3` | Maximum pods. **Must match your Kafka partition count** for true parallelism. |
+| `lagThreshold` | `100` | Unread messages per partition that triggers a new replica. Lower = faster scaling. |
+| `bootstrapServers` | `<EXTERNAL_KAFKA_IP>:9094` | IP:port of your external Kafka broker. |
+| `consumerGroup` | `foss-soc-engine` | Must match `group_id` in `configmaps.yaml`. |
+| `cooldownPeriod` | `120` | Seconds to wait before scaling down. Only relevant if `minReplicaCount=0`. |
+
+> **⚠️ Critical:** For KEDA to scale FOSS-Engine pods **meaningfully**, your Kafka topics must have **multiple partitions**. Kafka assigns one partition per consumer — if a topic has 1 partition, only 1 pod will ever receive messages, even if 3 are running. Run this on your Kafka machine to increase partitions:
+> ```bash
+> kafka-topics.sh --alter --topic summersoc --partitions 3 --bootstrap-server localhost:9092
+> kafka-topics.sh --alter --topic webserver --partitions 3 --bootstrap-server localhost:9092
+> kafka-topics.sh --alter --topic mailserver --partitions 3 --bootstrap-server localhost:9092
+> ```
+
+### VPA — Vertical Pod Autoscaler (for All 6 Services)
+
+VPA runs in `updateMode: "Off"` (observation only). It watches every service and generates the mathematically ideal CPU and RAM values based on real historical usage. It never restarts your pods — it only gives you recommendations to act on manually.
+
+```bash
+# View recommendations for ALL services at once
+kubectl describe vpa -n tlsoc
+
+# View recommendations for a specific service
+kubectl describe vpa elasticsearch-vpa -n tlsoc
+kubectl describe vpa kafka-vpa -n tlsoc
+kubectl describe vpa logstash-vpa -n tlsoc
+kubectl describe vpa foss-engine-vpa -n tlsoc
+kubectl describe vpa redis-vpa -n tlsoc
+kubectl describe vpa kibana-vpa -n tlsoc
+
+# List all VPAs and their current status
+kubectl get vpa -n tlsoc
+```
+
+In the output, look for the `Recommendation` section:
+```
+Recommendation:
+  Container Recommendations:
+    Container Name: elasticsearch
+      Target:      cpu: 163m    memory: 2281Mi   ← Use these values in values.yaml
+      Lower Bound: cpu: 25m     memory: 1500Mi   ← Bare minimum to survive
+      Upper Bound: cpu: 500m    memory: 4Gi      ← Peak under heavy load
+```
+
+**How to apply VPA recommendations:**
+1. Run `kubectl describe vpa <service>-vpa -n tlsoc` and note the **Target** values.
+2. Open `helm/tlsoc/values.yaml` and update the `requests` fields to match the Target.
+3. Set `limits` to ~30-50% above `requests` (never equal — limits need headroom).
+4. Run `helm upgrade tlsoc ./helm/tlsoc` to apply.
+5. Wait another week and repeat — VPA gets more accurate over time.
+
+> **⚠️ VPA + HPA conflict warning:** Never set VPA to `updateMode: "Auto"` for a service that HPA also controls (currently Logstash). They will fight each other. If you want VPA to auto-apply for Logstash, restrict VPA to only manage `memory` (not CPU), since HPA controls CPU:
+> ```yaml
+> resourcePolicy:
+>   containerPolicies:
+>   - containerName: logstash
+>     controlledResources: ["memory"]
+> ```
+
+---
+
+## 🔧 Configurable Settings Reference
+
+All the settings you can tune across the stack, organized by component.
+
+### Application Resources — `helm/tlsoc/values.yaml`
+
+This is your primary control panel. Edit these values and run `helm upgrade tlsoc ./helm/tlsoc` to apply any change live.
+
+```yaml
+elasticsearch:
+  resources:
+    requests:
+      memory: "1Gi"    # Minimum memory reserved for ES. Raise this if ES keeps OOM-crashing.
+      cpu: "500m"      # 500m = 0.5 CPU cores. VPA currently recommends ~163m.
+    limits:
+      memory: "2Gi"    # Maximum memory ES can ever use. Should be ~30% above requests.
+      cpu: "1000m"     # 1 full CPU core maximum.
+  storage: "20Gi"      # Longhorn PVC size per ES node. Cannot shrink after creation.
+
+kibana:
+  resources:
+    requests: { memory: "1Gi", cpu: "200m" }
+    limits:   { memory: "2Gi", cpu: "500m" }
+
+logstash:
+  replicas: 1          # Starting replicas. HPA will scale this up/down automatically.
+  resources:
+    requests: { memory: "512Mi", cpu: "200m" }  # VPA recommends ~78m CPU, ~1.2Gi memory.
+    limits:   { memory: "1Gi",   cpu: "500m" }  # ⚠️ VPA says memory limit is too tight — raise to 1.5Gi.
+
+foss_engine:
+  replicas: 1          # Starting replicas. KEDA will scale this up/down automatically.
+  resources:
+    requests: { memory: "256Mi", cpu: "100m" }  # VPA recommends 25m CPU, 250Mi memory.
+    limits:   { memory: "512Mi", cpu: "250m" }
+
+kafka:
+  replicas: 1          # Do NOT change — Kafka multi-node requires manual partition rebalancing.
+
+redis:
+  replicas: 1          # Do NOT change — Redis is a single-instance cache. Multi-node requires Redis Cluster mode.
+```
+
+### Autoscaling Settings
+
+**HPA (`helm/tlsoc/templates/hpa.yaml`):**
+
+| Setting | Default | Tune It When... |
+|---|---|---|
+| `minReplicas` | `1` | Always keep at 1 to avoid cold-start delays. |
+| `maxReplicas` | `3` | Increase if your machine has RAM for more Logstash pods. |
+| `averageUtilization` | `70%` | Lower to `50%` for more aggressive scaling; raise to `80%` to be more conservative. |
+| `stabilizationWindowSeconds` | `120` | Increase to `300` to prevent rapid scale-up/scale-down flapping. |
+
+**KEDA (`helm/tlsoc/templates/keda.yaml`):**
+
+| Setting | Default | Tune It When... |
+|---|---|---|
+| `minReplicaCount` | `1` | Set to `0` to save resources when no logs are flowing (KEDA will wake it up in ~15 seconds). |
+| `maxReplicaCount` | `3` | Set equal to your Kafka topic partition count for true parallelism. |
+| `lagThreshold` | `100` | Lower to `20` for faster reaction to log bursts. Raise to `500` to batch more before scaling. |
+| `bootstrapServers` | `<EXTERNAL_KAFKA_IP>:9094` | Change to point to any Kafka broker on any machine. |
+
+**VPA (`helm/tlsoc/templates/vpa.yaml`):**
+
+| Setting | Default | Tune It When... |
+|---|---|---|
+| `updateMode` | `"Off"` | Change to `"Auto"` for stateless services (foss-engine, logstash) once you trust VPA's recommendations. Never use `"Auto"` for databases. |
+
+Add resource bounds to prevent VPA from recommending extreme values:
+```yaml
+spec:
+  resourcePolicy:
+    containerPolicies:
+    - containerName: elasticsearch
+      minAllowed: { cpu: "100m", memory: "1Gi" }  # VPA won't recommend below this
+      maxAllowed: { cpu: "2000m", memory: "4Gi" }  # VPA won't recommend above this
+```
+
+### Longhorn Settings (via Longhorn UI)
+
+Access the UI: `kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80` → open `http://localhost:8080`
+
+| Setting | Recommended | Where |
+|---|---|---|
+| Default Replica Count | `1` (single-node) / `2` (multi-node) | Settings → General |
+| Default Data Locality | `best-effort` | Settings → General — keeps data on same node as pod |
+| Replica Auto Balance | `best-effort` | Settings → General — auto-rebalances when nodes join/leave |
+| Automatic Salvage | `Enabled` | Settings → General — recovers volumes if all nodes crash simultaneously |
+| Storage Over Provisioning % | `100` | Settings → General — prevents over-committing disk |
+| Storage Minimal Available % | `25` | Settings → General — stops new volumes if disk is 75%+ full |
+
+### Elasticsearch Node Scaling
+
+Elasticsearch is managed by the ECK Operator, not HPA. To add nodes, edit `helm/tlsoc/templates/elastic.yaml`:
+```yaml
+nodeSets:
+- name: default
+  count: 3   # Change from 1 to 3 for a proper HA cluster
+```
+ECK handles shard rebalancing automatically. Each node gets its own Longhorn PVC. Run `helm upgrade` to apply.
+
+> **⚠️ Prerequisite:** Each ES node needs ~2GB RAM. 3 nodes = ~6GB RAM just for Elasticsearch. Ensure your machine can handle it before scaling.
+
+---
+
 ## 🌐 Accessing the SOC (Kibana)
 
 You do not need to port-forward! Traefik handles the routing locally.
@@ -408,11 +646,28 @@ kubectl top pods -n tlsoc
 # See CPU and RAM usage of all nodes
 kubectl top nodes
 
-# Check HPA scaling status (current vs target CPU)
+# See CPU and RAM usage of all pods (requires metrics-server)
+kubectl top pods -n tlsoc
+
+# Check ALL HPA scaling status (current CPU vs target)
 kubectl get hpa -n tlsoc
 
-# Describe HPA for detailed scaling events
-kubectl describe hpa foss-engine-hpa -n tlsoc
+# Describe Logstash HPA for detailed scaling history and events
+kubectl describe hpa logstash-hpa -n tlsoc
+
+# Check KEDA ScaledObject status (is it connected to Kafka?)
+kubectl get scaledobject -n tlsoc
+
+# Full KEDA details: connection status, lag values, scaling events
+kubectl describe scaledobject foss-engine-scaler -n tlsoc
+
+# Check VPA recommendation status for all services
+kubectl get vpa -n tlsoc
+
+# Read VPA resource recommendations for a specific service
+kubectl describe vpa elasticsearch-vpa -n tlsoc
+kubectl describe vpa logstash-vpa -n tlsoc
+kubectl describe vpa foss-engine-vpa -n tlsoc
 ```
 
 ### Viewing Logs
@@ -444,13 +699,23 @@ helm upgrade tlsoc ./helm/tlsoc
 
 ### Scaling
 ```bash
-# Manually scale FOSS-Engine to 3 replicas
+# Manually force FOSS-Engine to 3 replicas (KEDA will override this within ~30 seconds)
 kubectl scale deployment foss-engine -n tlsoc --replicas=3
 
-# Manually scale Logstash to 2 replicas
+# Manually scale Logstash to 2 replicas (HPA will override based on CPU load)
 kubectl scale deployment logstash -n tlsoc --replicas=2
 
-# Or edit values.yaml and run helm upgrade (persistent change)
+# Permanently change min/max replicas — edit values.yaml and upgrade:
+helm upgrade tlsoc ./helm/tlsoc
+
+# Pause KEDA autoscaling temporarily (KEDA will stop managing replicas)
+kubectl annotate scaledobject foss-engine-scaler -n tlsoc autoscaling.keda.sh/paused=true
+
+# Resume KEDA autoscaling
+kubectl annotate scaledobject foss-engine-scaler -n tlsoc autoscaling.keda.sh/paused-
+
+# Check Kafka consumer lag on your external broker (run on the Kafka machine)
+kafka-consumer-groups.sh --describe --group foss-soc-engine --bootstrap-server localhost:9092
 ```
 
 ### Starting & Stopping the Cluster
@@ -597,6 +862,83 @@ sudo systemctl restart k3s
 
 # Verify metrics are flowing
 kubectl top pods -n tlsoc
+```
+
+### 13. KEDA shows `error describing topics: kafka server: topic does not exist`
+**Why:** This is expected and harmless. Kafka only creates a topic the moment the first log is sent to it. If no logs are flowing, the topic doesn't exist yet, so KEDA can't measure lag on it. It will resolve automatically when your target machines start sending logs.
+**It is NOT an error** — just a warning that KEDA is idle.
+
+### 14. KEDA ScaledObject shows `Ready: False` / `TriggerError`
+**Why:** KEDA cannot connect to the Kafka broker at `<EXTERNAL_KAFKA_IP>:9094`.
+**The Fix:**
+```bash
+# Check the KEDA operator logs for the exact connection error
+kubectl logs -l app=keda-operator -n keda --tail=50
+
+# Verify the Kafka IP/port is reachable from the K3s node
+nc -zv <EXTERNAL_KAFKA_IP> 9094
+
+# Check if the EXTERNAL listener is configured in Kafka's server.properties
+# It should have: listeners=EXTERNAL://0.0.0.0:9094
+# And: advertised.listeners=EXTERNAL://<EXTERNAL_KAFKA_IP>:9094
+```
+
+### 15. KEDA scales to 3 FOSS-Engine pods but log processing doesn't speed up
+**Why:** Your Kafka topics only have 1 partition. Kafka assigns partitions to consumers 1:1. With 1 partition, only 1 pod can receive messages regardless of how many pods exist.
+**The Fix:** Increase partitions on your Kafka broker machine:
+```bash
+# Run on the Kafka machine (not the K3s master)
+kafka-topics.sh --alter --topic summersoc --partitions 3 --bootstrap-server localhost:9092
+kafka-topics.sh --alter --topic webserver --partitions 3 --bootstrap-server localhost:9092
+kafka-topics.sh --alter --topic mailserver --partitions 3 --bootstrap-server localhost:9092
+kafka-topics.sh --alter --topic vulnerability --partitions 3 --bootstrap-server localhost:9092
+
+# Verify partitions were updated
+kafka-topics.sh --describe --topic summersoc --bootstrap-server localhost:9092
+```
+> **Note:** You cannot decrease partition count after setting it. Only increase.
+
+### 16. VPA not generating recommendations after 15+ minutes
+**Why:** VPA needs live metric data from the Metrics Server to generate recommendations. If the Metrics Server is down, or the pod has been restarted very recently, VPA has no data.
+**The Fix:**
+```bash
+# Check VPA recommender logs for errors
+kubectl logs -l app=vpa-recommender -n kube-system --tail=50
+
+# Ensure the Metrics Server is running and returning data
+kubectl top pods -n tlsoc
+
+# Check the raw VPA output — look for the Recommendation section
+kubectl describe vpa elasticsearch-vpa -n tlsoc
+```
+
+### 17. Elasticsearch fills its disk and stops indexing
+**Why:** By default, Elasticsearch enters read-only mode when the disk reaches 95% full. New logs from Logstash will be rejected.
+**The Fix:**
+```bash
+# Check how full the ES PVC is
+kubectl exec -n tlsoc tlsoc-es-default-0 -- df -h /usr/share/elasticsearch/data
+
+# Option 1: Delete old indices in Kibana → Stack Management → Index Management
+# Option 2: Temporarily unlock read-only mode:
+kubectl exec -n tlsoc tlsoc-es-default-0 -- curl -s -u elastic:$PASSWORD \
+  -X PUT "https://localhost:9200/_settings" \
+  -H 'Content-Type: application/json' \
+  -d '{"index.blocks.read_only_allow_delete": null}' --insecure
+
+# Option 3: Expand the PVC storage in values.yaml and run helm upgrade
+# (Longhorn supports online PVC expansion without downtime)
+```
+
+### 18. After upgrading Elasticsearch (ECK), Logstash stops shipping logs
+**Why:** ECK rotates internal TLS certificates when the Elasticsearch cluster is recreated or upgraded. Logstash's pod still holds the old CA certificate in memory.
+**The Fix:** Roll the Logstash deployment to force it to mount the new certificate:
+```bash
+kubectl rollout restart deployment logstash -n tlsoc
+
+# If Logstash is still not shipping (missed logs during downtime), wipe its position tracker:
+kubectl exec -n tlsoc deploy/logstash -- find /usr/share/logstash/state -name '.sincedb*' -delete
+kubectl rollout restart deployment logstash -n tlsoc
 ```
 
 ### 11. Longhorn Volumes stuck in "Degraded"
