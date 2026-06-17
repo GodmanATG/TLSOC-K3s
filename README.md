@@ -412,7 +412,7 @@ kubectl describe hpa logstash-hpa -n tlsoc
 | `averageUtilization` | `70` | Scale up when CPU exceeds 70% |
 | `stabilizationWindowSeconds` | `120` | Wait 2 minutes after a scale-up before scaling again |
 
-### KEDA — Kafka Event-Driven Autoscaling (for FOSS-Engine)
+### KEDA — Kubernetes Event-Driven Autoscaling (for FOSS-Engine)
 
 KEDA connects directly to your Kafka broker and counts how many messages are sitting unread in the consumer group (`foss-soc-engine`). When lag exceeds the threshold, KEDA adds FOSS-Engine pods. When the backlog clears, it scales back down. This is far more precise than CPU — a log flood triggers scaling before CPU even spikes.
 
