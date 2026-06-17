@@ -1,0 +1,50 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: foss-engine-scaler
+  namespace: tlsoc
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: foss-engine
+  pollingInterval: 15
+  cooldownPeriod: 120
+  minReplicaCount: 1
+  maxReplicaCount: 3
+  advanced:
+    restoreToOriginalReplicaCount: true
+  triggers:
+  # KEDA scales foss-engine based on consumer lag on the EXTERNAL Kafka broker.
+  # Replace <EXTERNAL_KAFKA_IP> with the IP of the machine running your source Kafka.
+  # The port 9094 is the external listener port. consumer group must match config.yaml group_id.
+  # lagThreshold: number of unread messages per partition that triggers a new replica.
+  # Set maxReplicaCount to match the number of Kafka topic partitions for true parallelism.
+  - type: kafka
+    metadata:
+      bootstrapServers: "<EXTERNAL_KAFKA_IP>:9094"
+      consumerGroup: "foss-soc-engine"
+      topic: "summersoc"
+      lagThreshold: "100"
+      offsetResetPolicy: "latest"
+  - type: kafka
+    metadata:
+      bootstrapServers: "<EXTERNAL_KAFKA_IP>:9094"
+      consumerGroup: "foss-soc-engine"
+      topic: "webserver"
+      lagThreshold: "100"
+      offsetResetPolicy: "latest"
+  - type: kafka
+    metadata:
+      bootstrapServers: "<EXTERNAL_KAFKA_IP>:9094"
+      consumerGroup: "foss-soc-engine"
+      topic: "mailserver"
+      lagThreshold: "100"
+      offsetResetPolicy: "latest"
+  - type: kafka
+    metadata:
+      bootstrapServers: "<EXTERNAL_KAFKA_IP>:9094"
+      consumerGroup: "foss-soc-engine"
+      topic: "vulnerability"
+      lagThreshold: "100"
+      offsetResetPolicy: "latest"
