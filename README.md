@@ -27,7 +27,7 @@ Logstash operates under a strict Zero-Trust model. The `/parser_output` volume c
 | **Helm** | Package Management | Replaces static YAML files. Allows us to dynamically inject passwords, scale replicas, and configure the entire cluster from a single `values.yaml` file. |
 | **Longhorn** | Distributed Storage | Provides highly available, block-level storage across all worker nodes. Pools storage across laptops and allows databases to seamlessly migrate or survive if a node crashes. |
 | **ECK Operator** | Database Management | The official Elastic Kubernetes Operator automatically handles Elasticsearch cluster formation, auto-healing dead nodes, generating secure passwords, and provisioning internal TLS certificates seamlessly. |
-| **Kafka & Redis** | Data Brokering | Kafka acts as an ultra-fast shock absorber. If 50,000 logs arrive instantly during a DDoS attack, Kafka holds them in a queue so the FOSS-Engine isn't overwhelmed. Redis handles high-speed caching for IP Geolocation. |
+| **Kafka & Redis** | Data Brokering | Kafka acts as an ultra-fast shock absorber. If 50,000 logs arrive instantly during a DDoS attack, Kafka holds them in a queue so the FOSS-Engine isn't overwhelmed. Redis acts as a short-term memory state store for multi-line log parsing. |
 | **Traefik** | Ingress Routing | Replaces `port-forwarding`. Traefik intercepts incoming web traffic, cleanly terminates HTTPS SSL certificates, and routes you directly to Kibana at `kibana.tlsoc.local`. |
 | **HPA** | CPU-Based Auto-Scaling | Monitors CPU usage of Logstash. When CPU exceeds 70%, it automatically spins up additional Logstash pods (up to 3) to absorb heavy log file load, then scales back down when idle. |
 | **KEDA** | Event-Driven Auto-Scaling | Scales the FOSS-Engine based on real Kafka consumer lag. When thousands of unread logs pile up on the Kafka broker, KEDA spins up more FOSS-Engine pods to burn through the backlog instantly. Far more precise than CPU-based scaling for queue-driven workloads. |
@@ -998,8 +998,8 @@ program_mapping:
 #### Stage 3: Parsing (Regex & Normalization)
 The Engine opens the corresponding `.yaml` rule file in the `rules/` directory. These files contain highly optimized Regular Expressions. For example, the `linux_auth.yaml` rule can extract the word `Failed password` from a Linux auth log and categorize it under `event.outcome: failure` and `event.category: authentication`. Every field is mapped to the **Elastic Common Schema (ECS)** so that Kibana dashboards work universally regardless of which server generated the log.
 
-#### Stage 4: Enrichment (GeoIP & Redis Cache)
-If the log contains a public IP address (`source.ip`), the Engine performs an ultra-fast local lookup against a **MaxMind GeoLite2** database (`database/GeoLite2-City.mmdb`). It attaches Country, City, and Latitude/Longitude coordinates to the log. For extreme speed, it uses **Redis** to cache IPs it has already looked up, so repeated requests for the same IP are answered in microseconds instead of milliseconds.
+#### Stage 4: Enrichment (GeoIP)
+If the log contains a public IP address (`source.ip`), the Engine performs an ultra-fast local lookup against a **MaxMind GeoLite2** database (`database/GeoLite2-City.mmdb`). It attaches Country, City, and Latitude/Longitude coordinates to the log.
 
 #### Stage 5: Output (Batched File Drop)
 Once the log is a perfectly formatted JSON object, the Engine batches up to **1000 logs** (or waits **5 seconds**, whichever comes first) and drops them as a single `.json` file into the `/var/log/soc_output/` directory. This directory is a shared Longhorn RWX volume (`parser-output` PVC). Logstash monitors this directory, instantly picks up the new files, and securely pipes the structured JSON into Elasticsearch.
@@ -1018,7 +1018,7 @@ engine/
 │   ├── schema.py        # LogInput dataclass — ECS field definitions
 │   └── registry.py      # RuleRegistry — loads and caches YAML rule files
 ├── utils/
-│   └── geoip.py         # GeoIP lookup and Redis caching logic
+│   └── geoip.py         # GeoIP lookup logic
 └── rules/
     ├── apache_access.yaml   # Apache/Nginx access log parser
     ├── linux_auth.yaml      # SSH, Sudo, Su authentication parser
