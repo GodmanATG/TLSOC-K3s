@@ -12,6 +12,7 @@ from kafka import KafkaConsumer
 from core.schema import LogInput
 from core.registry import RuleRegistry
 import signal
+import fcntl
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -160,8 +161,14 @@ def flush_batch(batch):
 
     for module, lines in files.items():
         try:
-            with open(os.path.join(OUTPUT_DIR, f"{module}.json"), "a") as f:
-                f.write("\n".join(lines) + "\n")
+            filepath = os.path.join(OUTPUT_DIR, f"{module}.json")
+            with open(filepath, "a") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    f.write("\n".join(lines) + "\n")
+                    f.flush()
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except Exception as e:
             logger.error(f"Batch write failed for {module}: {e}")
 
