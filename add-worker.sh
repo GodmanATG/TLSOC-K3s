@@ -46,9 +46,9 @@ fi
 
 # 3. Install Storage Dependencies for Longhorn
 echo ""
-echo "📦 Installing required storage dependencies (open-iscsi, nfs-common, cryptsetup)..."
+echo "📦 Installing required storage dependencies (open-iscsi, nfs-common, cryptsetup, linux-modules-extra)..."
 
-if sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup; then
+if sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup linux-modules-extra-$(uname -r); then
     echo "✅ Dependencies installed successfully."
     sudo systemctl enable --now iscsid
 else
@@ -56,7 +56,7 @@ else
     echo "    Your package manager might be locked or offline."
     echo "    Longhorn requires these packages to function properly."
     echo "    Please run this command manually later:"
-    echo "    sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup"
+    echo "    sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup linux-modules-extra-\$(uname -r)"
 fi
 
 echo ""
@@ -71,6 +71,13 @@ else
     echo "⚠️  WARNING: Failed to load iscsi_tcp module!"
     echo "    Longhorn volumes may fail to attach on this node."
 fi
+
+echo ""
+echo "🛡️ Securing Storage: Disabling conflicting multipathd service..."
+sudo systemctl stop multipathd.socket multipathd.service 2>/dev/null || true
+sudo systemctl disable multipathd.socket multipathd.service 2>/dev/null || true
+sudo systemctl mask multipathd.socket multipathd.service 2>/dev/null || true
+echo "✅ multipathd masked successfully."
 
 # 4. Install K3s Agent
 echo ""

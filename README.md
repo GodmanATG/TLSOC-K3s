@@ -61,14 +61,22 @@ Because Elasticsearch and Java applications require significant memory, we have 
 > - Verify that K3s is fully started **before** deploying the Helm chart: `sudo systemctl status k3s`
 > - Verify Kubernetes is responsive: `kubectl get nodes` should show your node as `Ready`.
 
-### Step 1 — Prerequisites
-Ensure Docker and Helm are installed on your Linux machine.
+### Step 1 — Prerequisites (Node Prep)
+Ensure your Master Node has Docker, Helm, and the required Longhorn storage dependencies installed before building the cluster.
 ```bash
-# Install Docker
-sudo apt update && sudo apt install -y docker.io
+# 1. Install Docker & Storage Dependencies
+sudo apt update && sudo apt install -y docker.io open-iscsi nfs-common cryptsetup linux-modules-extra-$(uname -r)
 sudo usermod -aG docker $USER && newgrp docker
 
-# Install Helm
+# 2. Secure Storage: Mask Multipathd & Load Kernel Modules
+sudo systemctl stop multipathd.socket multipathd.service 2>/dev/null || true
+sudo systemctl disable multipathd.socket multipathd.service 2>/dev/null || true
+sudo systemctl mask multipathd.socket multipathd.service 2>/dev/null || true
+sudo modprobe iscsi_tcp
+echo "iscsi_tcp" | sudo tee -a /etc/modules
+sudo systemctl enable --now iscsid
+
+# 3. Install Helm
 curl -sfL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 ```
 
@@ -378,15 +386,19 @@ To restrict how much storage Longhorn can use on a specific laptop:
 When adding nodes, you might see red warning icons in the Longhorn UI under Node Conditions. Here is what they mean and how to fix them:
 
 **1. `KernelModulesLoaded` is Red**
-* **Issue:** Longhorn needs the `iscsi_tcp` module loaded into the kernel to attach virtual hard drives.
-* **Fix:** Run this on the affected node:
+* **Issue:** Longhorn needs the `iscsi_tcp` module loaded into the kernel to attach virtual hard drives. Standard Ubuntu Desktop or certain cloud images often don't include this module by default. Furthermore, Longhorn can cache failures and ignore the module even after it's loaded.
+* **Fix:** Install the extra modules package, load the module, and hard-restart Longhorn to force a rescan:
   ```bash
+  sudo apt-get update && sudo apt-get install -y linux-modules-extra-$(uname -r)
   sudo modprobe iscsi_tcp
   echo "iscsi_tcp" | sudo tee -a /etc/modules
+  sudo systemctl restart iscsid
+  sudo systemctl enable iscsid
+  kubectl delete pod -n longhorn-system -l app=longhorn-manager
   ```
 
 **2. `RequiredPackages` is Red**
-* **Issue:** The node failed to install the NFS or iSCSI clients automatically (usually due to a locked `apt` process).
+* **Issue:** The node failed to install the NFS or iSCSI clients automatically (usually due to a locked `apt` process). Without NFS, our stack cannot mount the shared `/parser_output` folder.
 * **Fix:** Run this on the affected node:
   ```bash
   sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup
@@ -394,15 +406,13 @@ When adding nodes, you might see red warning icons in the Longhorn UI under Node
   ```
 
 **3. `Multipathd` is Red**
-* **Issue:** A background service called `multipathd` is running and might hijack Longhorn's virtual hard drives, turning them read-only.
-* **Fix:** Run this to blacklist Longhorn devices and restart the service:
+* **Issue:** A legacy background service called `multipathd` (used for physical enterprise SAN arrays) is running. If left active, it detects Longhorn's virtual drives and tries to manage them, causing a conflict that forces the drives into Read-Only mode and crashes our databases.
+* **Fix:** Since K3s nodes use Software-Defined Storage rather than physical SANs, `multipathd` is completely obsolete. The most robust fix is to aggressively disable and mask the service so systemd cannot auto-restart it via sockets:
   ```bash
-  sudo tee /etc/multipath.conf <<EOF
-  blacklist {
-      devnode "^sd[a-z0-9]+"
-  }
-  EOF
-  sudo systemctl restart multipathd
+  sudo systemctl stop multipathd.socket multipathd.service
+  sudo systemctl disable multipathd.socket multipathd.service
+  sudo systemctl mask multipathd.socket multipathd.service
+  kubectl delete pod -n longhorn-system -l app=longhorn-manager
   ```
 
 ### Key Longhorn Settings
