@@ -97,8 +97,11 @@ export KUBECONFIG=~/.kube/config
 ### Step 3 — Install Longhorn (Distributed Storage)
 Longhorn provides resilient, replicated block storage across all nodes. Install it before deploying the SOC stack.
 ```bash
-# 1. Install storage dependencies required by Longhorn
-sudo apt-get install -y open-iscsi nfs-common
+# 1.First, install the storage networking dependencies required for Longhorn volume replication:
+sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup
+sudo systemctl enable --now iscsid
+sudo modprobe iscsi_tcp
+echo "iscsi_tcp" | sudo tee -a /etc/modules
 
 # 2. Install Longhorn via Helm
 helm repo add longhorn https://charts.longhorn.io
@@ -205,7 +208,7 @@ TLSOC is designed to start on a single laptop and seamlessly expand to a multi-n
 To make joining nodes completely painless, we wrote `add-worker.sh`. It is an interactive script that runs on the new worker laptop. Under the hood, it:
 1. **Prompts** for the Master Node's IP address and cluster join token.
 2. **Auto-detects** the safest network IP (or VPN IP) to route traffic to the Master node by running `ip route get <MASTER_IP>`.
-3. **Installs** critical storage dependencies required by Longhorn (`open-iscsi`, `nfs-common`).
+3. **Installs** critical storage dependencies required by Longhorn (`open-iscsi`, `nfs-common`, `cryptsetup`).
 4. **Downloads** the K3s Agent binary and registers the node securely to the Master using the `--node-ip` flag to prevent VPN routing conflicts.
 
 ### Step 1 — Get the Join Credentials (on Master Node)
@@ -260,7 +263,7 @@ sudo docker save foss-soc-engine:latest | sudo k3s ctr images import -
 **3. Longhorn Storage Dependencies**
 The `add-worker.sh` script installs these automatically, but if you joined manually:
 ```bash
-sudo apt-get install -y open-iscsi nfs-common
+sudo apt-get install -y open-iscsi nfs-common cryptsetup
 ```
 
 #### What runs automatically vs. what doesn't?
@@ -370,6 +373,37 @@ To restrict how much storage Longhorn can use on a specific laptop:
   * To take a snapshot: Click a Volume → Click **Take Snapshot**.
   * To revert: Click the snapshot in the timeline → Click **Revert**.
 * **Backups (Disaster Recovery):** Snapshots are kept on the local disk. Backups upload that snapshot off-site (to AWS S3 or an NFS server). Configure your Backup Target in `Settings > General > Backup Target`.
+
+### 🛡️ Longhorn Storage: Potential Node Warnings & Solutions
+When adding nodes, you might see red warning icons in the Longhorn UI under Node Conditions. Here is what they mean and how to fix them:
+
+**1. `KernelModulesLoaded` is Red**
+* **Issue:** Longhorn needs the `iscsi_tcp` module loaded into the kernel to attach virtual hard drives.
+* **Fix:** Run this on the affected node:
+  ```bash
+  sudo modprobe iscsi_tcp
+  echo "iscsi_tcp" | sudo tee -a /etc/modules
+  ```
+
+**2. `RequiredPackages` is Red**
+* **Issue:** The node failed to install the NFS or iSCSI clients automatically (usually due to a locked `apt` process).
+* **Fix:** Run this on the affected node:
+  ```bash
+  sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup
+  sudo systemctl enable --now iscsid
+  ```
+
+**3. `Multipathd` is Red**
+* **Issue:** A background service called `multipathd` is running and might hijack Longhorn's virtual hard drives, turning them read-only.
+* **Fix:** Run this to blacklist Longhorn devices and restart the service:
+  ```bash
+  sudo tee /etc/multipath.conf <<EOF
+  blacklist {
+      devnode "^sd[a-z0-9]+"
+  }
+  EOF
+  sudo systemctl restart multipathd
+  ```
 
 ### Key Longhorn Settings
 | Setting | Recommended Value | What It Does |

@@ -46,9 +46,31 @@ fi
 
 # 3. Install Storage Dependencies for Longhorn
 echo ""
-echo "📦 Installing required storage dependencies (open-iscsi, nfs-common)..."
-sudo apt-get update -qq
-sudo apt-get install -y open-iscsi nfs-common
+echo "📦 Installing required storage dependencies (open-iscsi, nfs-common, cryptsetup)..."
+
+if sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup; then
+    echo "✅ Dependencies installed successfully."
+    sudo systemctl enable --now iscsid
+else
+    echo "⚠️  WARNING: Failed to install storage dependencies automatically!"
+    echo "    Your package manager might be locked or offline."
+    echo "    Longhorn requires these packages to function properly."
+    echo "    Please run this command manually later:"
+    echo "    sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup"
+fi
+
+echo ""
+echo "🔄 Loading iscsi_tcp kernel module required for Longhorn..."
+if sudo modprobe iscsi_tcp; then
+    echo "✅ iscsi_tcp module loaded."
+    # Make it persistent across reboots
+    if ! grep -q "^iscsi_tcp" /etc/modules; then
+        echo "iscsi_tcp" | sudo tee -a /etc/modules > /dev/null
+    fi
+else
+    echo "⚠️  WARNING: Failed to load iscsi_tcp module!"
+    echo "    Longhorn volumes may fail to attach on this node."
+fi
 
 # 4. Install K3s Agent
 echo ""
