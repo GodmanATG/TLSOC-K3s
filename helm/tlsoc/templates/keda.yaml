@@ -15,35 +15,35 @@ spec:
   advanced:
     restoreToOriginalReplicaCount: true
   triggers:
-  # KEDA scales foss-engine based on consumer lag on the EXTERNAL Kafka broker.
-  # Replace <EXTERNAL_KAFKA_IP> with the IP of the machine running your source Kafka.
-  # The port 9094 is the external listener port. consumer group must match config.yaml group_id.
+  # KEDA scales foss-engine based on consumer lag on the Kafka broker.
+  # The broker host and port are configured in values.yaml (kafka.host, kafka.port).
+  # The consumer group must match config.yaml group_id.
   # lagThreshold: number of unread messages per partition that triggers a new replica.
   # Set maxReplicaCount to match the number of Kafka topic partitions for true parallelism.
   - type: kafka
     metadata:
-      bootstrapServers: "<EXTERNAL_KAFKA_IP>:9094"
+      bootstrapServers: "{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"
       consumerGroup: "foss-soc-engine"
       topic: "summersoc"
       lagThreshold: "100"
       offsetResetPolicy: "latest"
   - type: kafka
     metadata:
-      bootstrapServers: "<EXTERNAL_KAFKA_IP>:9094"
+      bootstrapServers: "{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"
       consumerGroup: "foss-soc-engine"
       topic: "webserver"
       lagThreshold: "100"
       offsetResetPolicy: "latest"
   - type: kafka
     metadata:
-      bootstrapServers: "<EXTERNAL_KAFKA_IP>:9094"
+      bootstrapServers: "{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"
       consumerGroup: "foss-soc-engine"
       topic: "mailserver"
       lagThreshold: "100"
       offsetResetPolicy: "latest"
   - type: kafka
     metadata:
-      bootstrapServers: "<EXTERNAL_KAFKA_IP>:9094"
+      bootstrapServers: "{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"
       consumerGroup: "foss-soc-engine"
       topic: "vulnerability"
       lagThreshold: "100"

@@ -143,7 +143,7 @@ helm install keda kedacore/keda --namespace keda --create-namespace
 kubectl get pods -n keda
 ```
 
-> **Note:** After installing KEDA, open `helm/tlsoc/templates/keda.yaml` and replace `<EXTERNAL_KAFKA_IP>` with the IP address of your Kafka broker machine. This is the machine that your target servers send logs to (not the K3s master).
+> **Note:** KEDA auto-scaling is configured centrally via `values.yaml`. By default, it connects to the internal cluster Kafka. If you are using an external Kafka broker, update `kafka.host` and `kafka.port` in `values.yaml` before deploying.
 
 ### Step 6 — Install VPA (Vertical Pod Autoscaler)
 VPA silently monitors all 6 services and generates ideal CPU/RAM recommendations without ever restarting your pods (it's in observation mode).
@@ -475,7 +475,8 @@ kubectl get hpa -n tlsoc
 | `minReplicaCount` | `1` | Minimum FOSS-Engine pods. Set to `0` to scale to zero when no logs flow. |
 | `maxReplicaCount` | `3` | Maximum pods. **Must match your Kafka partition count** for true parallelism. |
 | `lagThreshold` | `100` | Unread messages per partition that triggers a new replica. Lower = faster scaling. |
-| `bootstrapServers` | `<EXTERNAL_KAFKA_IP>:9094` | IP:port of your external Kafka broker. |
+| `kafka.host` | `kafka.tlsoc.svc.cluster.local` | Internal DNS or external IP of your Kafka broker. |
+| `kafka.port` | `9092` | Port of your Kafka broker. |
 | `consumerGroup` | `foss-soc-engine` | Must match `group_id` in `configmaps.yaml`. |
 | `cooldownPeriod` | `120` | Seconds to wait before scaling down. Only relevant if `minReplicaCount=0`. |
 
@@ -594,7 +595,7 @@ redis:
 | `minReplicaCount` | `1` | Set to `0` to save resources when no logs are flowing (KEDA will wake it up in ~15 seconds). |
 | `maxReplicaCount` | `3` | Set equal to your Kafka topic partition count for true parallelism. |
 | `lagThreshold` | `100` | Lower to `20` for faster reaction to log bursts. Raise to `500` to batch more before scaling. |
-| `bootstrapServers` | `<EXTERNAL_KAFKA_IP>:9094` | Change to point to any Kafka broker on any machine. |
+| `kafka.host / kafka.port` | `kafka.tlsoc.svc.cluster.local:9092` | Central configuration to point the entire stack to any Kafka broker. |
 
 **VPA (`helm/tlsoc/templates/vpa.yaml`):**
 
@@ -921,18 +922,17 @@ kubectl describe pvc <pvc-name> -n tlsoc
 **It is NOT an error** — just a warning that KEDA is idle.
 
 ### 13. KEDA ScaledObject shows `Ready: False` / `TriggerError`
-**Why:** KEDA cannot connect to the Kafka broker at `<EXTERNAL_KAFKA_IP>:9094`.
-**The Fix:**
+**Why:** KEDA cannot connect to the Kafka broker defined in your `values.yaml`.
+**Solution:**
+1. If using the internal default, ensure the `kafka` statefulset is running.
+2. If connecting to an external broker, verify `kafka.host` in `values.yaml` is correct.
+3. Verify network connectivity from the K3s node to your external broker:
 ```bash
-# Check the KEDA operator logs for the exact connection error
+nc -zv <YOUR_EXTERNAL_KAFKA_IP> 9094
+```
+**Check KEDA logs for details:**
+```bash
 kubectl logs -l app=keda-operator -n keda --tail=50
-
-# Verify the Kafka IP/port is reachable from the K3s node
-nc -zv <EXTERNAL_KAFKA_IP> 9094
-
-# Check if the EXTERNAL listener is configured in Kafka's server.properties
-# It should have: listeners=EXTERNAL://0.0.0.0:9094
-# And: advertised.listeners=EXTERNAL://<EXTERNAL_KAFKA_IP>:9094
 ```
 
 ### 14. KEDA scales to 3 FOSS-Engine pods but log processing doesn't speed up

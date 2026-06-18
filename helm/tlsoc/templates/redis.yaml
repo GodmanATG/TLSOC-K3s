@@ -51,12 +51,7 @@ spec:
           image: redis:7-alpine
           command: ["redis-server", "--save", "60", "1", "--loglevel", "notice"]
           resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
-            limits:
-              cpu: "100m"
-              memory: "128Mi"
+            {{- toYaml .Values.redis.resources | nindent 12 }}
           ports:
             - containerPort: 6379
           startupProbe:

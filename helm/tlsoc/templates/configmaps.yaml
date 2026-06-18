@@ -54,9 +54,9 @@ metadata:
   name: kafka-config
   namespace: tlsoc
 data:
-  # ⚠️  Update to your WSL/machine IP — run: hostname -I | awk '{print $1}'
-  # ⚠️ Replace with your machine's IP: hostname -I | awk '{print $1}'
-  KAFKA_ADVERTISED_HOST: "<YOUR_MACHINE_IP>"
+  # By default, Kafka is configured for internal cluster access only.
+  # If you want external machines to send logs to this Kafka, change kafka.host in values.yaml to this machine's IP.
+  KAFKA_ADVERTISED_HOST: "{{ .Values.kafka.host }}"
 
 ---
 apiVersion: v1
@@ -67,9 +67,7 @@ metadata:
 data:
   config.yaml: |
     kafka:
-      # Use local Kafka: kafka.tlsoc.svc.cluster.local:9092
-      # Or external Kafka: <EXTERNAL_KAFKA_IP>:9094
-      bootstrap_servers: ["kafka.tlsoc.svc.cluster.local:9092"]
+      bootstrap_servers: ["{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"]
       input_topic: "^(webserver|vulnerability|mailserver|proxyserver|summersoc|.*)$"
       group_id: "foss-soc-engine"
       auto_offset_reset: "latest"
