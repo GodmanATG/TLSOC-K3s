@@ -13,6 +13,7 @@ spec:
       labels:
         app: foss-engine
     spec:
+      terminationGracePeriodSeconds: 45
       containers:
         - name: foss-engine
           image: foss-soc-engine:latest
