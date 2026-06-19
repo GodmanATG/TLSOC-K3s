@@ -714,6 +714,15 @@ kubectl describe vpa logstash-vpa -n tlsoc
 kubectl describe vpa foss-engine-vpa -n tlsoc
 ```
 
+### Advanced Operations (Rollbacks & DNS)
+```bash
+# Instantly rollback a deployment if an update breaks it (e.g., Logstash crashing)
+kubectl rollout undo deployment logstash -n tlsoc
+
+# Spin up a temporary Ubuntu pod to test internal DNS resolution (CoreDNS)
+kubectl run -i --tty --rm debug --image=ubuntu --restart=Never -n tlsoc -- sh -c "apt update && apt install dnsutils -y && nslookup kafka.tlsoc.svc.cluster.local"
+```
+
 ### Viewing Logs
 ```bash
 # Watch the FOSS-Engine parse logs in real-time
