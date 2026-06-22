@@ -186,14 +186,9 @@ sudo docker build -t foss-soc-engine:latest \
 > Run this command every time you rebuild the FOSS-Engine image!
 
 ### Step 8 — Configure & Deploy TLSOC via Helm
-Before deploying, you **must** set your machine's IP address in the Kafka configuration.
-```bash
-# Get your machine's IP
-hostname -I | awk '{print $1}'
+By default, the stack is perfectly configured to use the internal Kafka broker running inside Kubernetes. 
 
-# Edit the configmap in helm/tlsoc/templates/configmaps.yaml
-# Replace <YOUR_MACHINE_IP> with your actual IP address
-```
+If you ever decide to use a dedicated external Kafka broker, simply open `helm/tlsoc/values.yaml` and update the `kafka.host` and `kafka.port` values. You no longer need to edit any YAML templates directly!
 
 Deploy the entire stack:
 ```bash
