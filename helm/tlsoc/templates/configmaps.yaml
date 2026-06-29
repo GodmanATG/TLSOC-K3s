@@ -5,7 +5,7 @@ metadata:
   namespace: tlsoc
 data:
   ELASTIC_VERSION: "8.19.12"
-  ELASTIC_HEAP: "2g"
+  ELASTIC_HEAP: "1g"
 
 ---
 apiVersion: v1
@@ -29,7 +29,7 @@ data:
       file {
         path => "/parser_output/*.json"
         start_position => "beginning"
-        sincedb_path => "/usr/share/logstash/state/.sincedb"
+        sincedb_path => "/parser_output/.sincedb-${HOSTNAME}"
         codec => json
         mode => "tail"
       }
@@ -44,6 +44,10 @@ data:
         user => "elastic"
         password => "${ELASTIC_PASSWORD}"
         index => "fosstlsoc-logs-%{+YYYY.MM.dd}"
+      }
+      file {
+        path => "/archive/cold-storage-%{+YYYY.MM.dd}-%{host}.json"
+        codec => "json_lines"
       }
     }
 
@@ -70,7 +74,7 @@ data:
       bootstrap_servers: ["{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"]
       input_topic: "^(webserver|vulnerability|mailserver|proxyserver|summersoc|.*)$"
       group_id: "foss-soc-engine"
-      auto_offset_reset: "latest"
+      auto_offset_reset: "earliest"
     batch:
       size: 1000
       timeout_sec: 5

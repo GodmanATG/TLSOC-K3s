@@ -10,13 +10,15 @@ The TLSOC architecture is designed to ingest massive volumes of security logs (f
 
 The flow of data looks like this:
 1. **Target Machines (Filebeat)** send raw logs to the central **Kafka** Message Broker.
-2. The **FOSS-Engine** (our custom Python parsing engine) reads the raw logs from Kafka topics (`webserver`, `mailserver`, etc.), normalizes them against our proprietary SIEM rules, and drops structured `.json` files onto a persistent hard drive (`/parser_output`).
-3. **Logstash** monitors that hard drive, instantly picks up the new `.json` files, and securely pipes them into **Elasticsearch**.
+2. The **FOSS-Engine** (our custom Python parsing engine) reads the raw logs from Kafka topics (`webserver`, `mailserver`, etc.), normalizes them against our proprietary SIEM rules, and drops structured `.json` files onto a persistent hard drive.
+3. **Logstash** (running as a Sidecar container in the exact same pod) monitors that hard drive, instantly picks up the new `.json` files, and securely pipes them into **Elasticsearch**.
 4. Security Analysts log into **Kibana** (via Traefik Ingress) to view real-time dashboards and trigger alerts.
+
+### StatefulSet & RWO Storage Architecture (The Fix for NFS Locks)
+To prevent Linux `inotify` file-watching bugs associated with NFS (ReadWriteMany) network drives, the FOSS-Engine is deployed as a **StatefulSet**. This guarantees that every single FOSS-Engine pod gets its own dedicated, isolated **Longhorn ReadWriteOnce (RWO)** hard drive (`/parser_output`). Because the drive is strictly attached to one pod, Logstash can instantly and reliably detect file changes using native block-storage events.
 
 ### Zero-Trust Architecture
 Logstash operates under a strict Zero-Trust model. The `/parser_output` volume containing the critical JSON logs is mounted strictly as `readOnly: true` to Logstash. Logstash's internal file-tracking database (`.sincedb`) is persisted to its own isolated `logstash-state` volume, ensuring that if Logstash is ever compromised, attackers cannot modify or delete the original parsed logs.
-
 ---
 
 ## 🛠️ Technology Stack (And Why We Chose It)
@@ -29,7 +31,6 @@ Logstash operates under a strict Zero-Trust model. The `/parser_output` volume c
 | **ECK Operator** | Database Management | The official Elastic Kubernetes Operator automatically handles Elasticsearch cluster formation, auto-healing dead nodes, generating secure passwords, and provisioning internal TLS certificates seamlessly. |
 | **Kafka & Redis** | Data Brokering | Kafka acts as an ultra-fast shock absorber. If 50,000 logs arrive instantly during a DDoS attack, Kafka holds them in a queue so the FOSS-Engine isn't overwhelmed. Redis acts as a short-term memory state store for multi-line log parsing. |
 | **Traefik** | Ingress Routing | Replaces `port-forwarding`. Traefik intercepts incoming web traffic, cleanly terminates HTTPS SSL certificates, and routes you directly to Kibana at `kibana.tlsoc.local`. |
-| **HPA** | CPU-Based Auto-Scaling | Monitors CPU usage of Logstash. When CPU exceeds 70%, it automatically spins up additional Logstash pods (up to 3) to absorb heavy log file load, then scales back down when idle. |
 | **KEDA** | Event-Driven Auto-Scaling | Scales the FOSS-Engine based on real Kafka consumer lag. When thousands of unread logs pile up on the Kafka broker, KEDA spins up more FOSS-Engine pods to burn through the backlog instantly. Far more precise than CPU-based scaling for queue-driven workloads. |
 | **VPA** | Vertical Resource Tuning | Watches all 6 services in observation mode and generates mathematically perfect CPU/RAM recommendations based on actual historical usage. Use its output to tune `values.yaml` and prevent OOM-kills or resource starvation. |
 
@@ -201,7 +202,7 @@ helm install tlsoc ./helm/tlsoc
 
 ## 🖥️ Scaling to Multiple Nodes (Multi-Laptop Cluster)
 
-TLSOC is designed to start on a single laptop and seamlessly expand to a multi-node cluster. Stateless workloads (FOSS-Engine, Logstash) will automatically distribute across all connected laptops via the HPA.
+TLSOC is designed to start on a single laptop and seamlessly expand to a multi-node cluster. Stateless workloads (FOSS-Engine, Logstash) will automatically distribute across all connected laptops via KEDA.
 
 ### Architecture Overview
 * **Master Node (Control Plane):** Runs K3s Server, Elasticsearch, Kafka, and Redis. These stateful services are pinned here via `nodeSelector` so their data stays on one disk.
@@ -427,28 +428,9 @@ When adding nodes, you might see red warning icons in the Longhorn UI under Node
 
 ---
 
-## ⚖️ Autoscaling Deep Dive (HPA, KEDA & VPA)
+## ⚖️ Autoscaling Deep Dive (KEDA & VPA)
 
-TLSOC uses three complementary autoscaling technologies. Each solves a different problem.
-
-### HPA — Horizontal Pod Autoscaler (for Logstash)
-
-HPA watches CPU usage. When Logstash's CPU exceeds the threshold, it adds more Logstash pods. Logstash reads from the filesystem (`/parser_output`), so CPU is the correct signal — there's no queue lag to measure.
-
-```bash
-# See current HPA status (shows current CPU vs target)
-kubectl get hpa -n tlsoc
-
-# See detailed scaling history and events
-kubectl describe hpa logstash-hpa -n tlsoc
-```
-
-| Setting in `hpa.yaml` | Default | Effect |
-|---|---|---|
-| `minReplicas` | `1` | Never scale below 1 pod |
-| `maxReplicas` | `3` | Never scale above 3 pods |
-| `averageUtilization` | `70` | Scale up when CPU exceeds 70% |
-| `stabilizationWindowSeconds` | `120` | Wait 2 minutes after a scale-up before scaling again |
+TLSOC uses two complementary autoscaling technologies. Each solves a different problem.
 
 ### KEDA — Kubernetes Event-Driven Autoscaling (for FOSS-Engine)
 
@@ -519,7 +501,7 @@ Recommendation:
 4. Run `helm upgrade tlsoc ./helm/tlsoc` to apply.
 5. Wait another week and repeat — VPA gets more accurate over time.
 
-> **⚠️ VPA + HPA conflict warning:** Never set VPA to `updateMode: "Auto"` for a service that HPA also controls (currently Logstash). They will fight each other. If you want VPA to auto-apply for Logstash, restrict VPA to only manage `memory` (not CPU), since HPA controls CPU:
+> **⚠️ VPA configuration:** Set VPA to `updateMode: "Off"` for all services initially, until you trust its recommendations.
 > ```yaml
 > resourcePolicy:
 >   containerPolicies:
@@ -554,7 +536,7 @@ kibana:
     limits:   { memory: "2Gi", cpu: "500m" }
 
 logstash:
-  replicas: 1          # Starting replicas. HPA will scale this up/down automatically.
+  # Logstash runs as a sidecar to FOSS-Engine, so it shares the same replica count.
   resources:
     requests: { memory: "512Mi", cpu: "200m" }  # VPA recommends ~78m CPU, ~1.2Gi memory.
     limits:   { memory: "1Gi",   cpu: "500m" }  # ⚠️ VPA says memory limit is too tight — raise to 1.5Gi.
@@ -574,14 +556,6 @@ redis:
 
 ### Autoscaling Settings
 
-**HPA (`helm/tlsoc/templates/hpa.yaml`):**
-
-| Setting | Default | Tune It When... |
-|---|---|---|
-| `minReplicas` | `1` | Always keep at 1 to avoid cold-start delays. |
-| `maxReplicas` | `3` | Increase if your machine has RAM for more Logstash pods. |
-| `averageUtilization` | `70%` | Lower to `50%` for more aggressive scaling; raise to `80%` to be more conservative. |
-| `stabilizationWindowSeconds` | `120` | Increase to `300` to prevent rapid scale-up/scale-down flapping. |
 
 **KEDA (`helm/tlsoc/templates/keda.yaml`):**
 
@@ -623,7 +597,7 @@ Access the UI: `kubectl port-forward -n longhorn-system svc/longhorn-frontend 80
 
 ### Elasticsearch Node Scaling
 
-Elasticsearch is managed by the ECK Operator, not HPA. To add nodes, edit `helm/tlsoc/templates/elastic.yaml`:
+Elasticsearch is managed by the ECK Operator. To add nodes, edit `helm/tlsoc/templates/elastic.yaml`:
 ```yaml
 nodeSets:
 - name: default
@@ -670,7 +644,19 @@ sudo systemctl status k3s-agent
 # See Persistent Storage Volumes (Hard drives)
 kubectl get pvc -n tlsoc
 
-# See which StorageClass each PVC is using
+### Accessing the Parsed Logs (StatefulSet Volumes)
+Because FOSS-Engine runs as a StatefulSet with isolated ReadWriteOnce volumes, you must `exec` into a specific pod to see its parsed JSON files:
+```bash
+# View parsed logs inside pod 0
+kubectl exec -it foss-engine-0 -n tlsoc -c foss-engine -- tail -f /var/log/soc_output/webserver.json
+
+# View parsed logs inside pod 1 (if KEDA has scaled up)
+kubectl exec -it foss-engine-1 -n tlsoc -c foss-engine -- tail -f /var/log/soc_output/webserver.json
+```
+
+### Storage Maintenance
+```bash
+# Check PVC status (you should see one PVC per FOSS-Engine pod)
 kubectl get pvc -n tlsoc -o custom-columns=NAME:.metadata.name,SIZE:.spec.resources.requests.storage,STORAGECLASS:.spec.storageClassName
 
 # Check Longhorn volume health
@@ -687,12 +673,6 @@ kubectl top nodes
 
 # See CPU and RAM usage of all pods (requires metrics-server)
 kubectl top pods -n tlsoc
-
-# Check ALL HPA scaling status (current CPU vs target)
-kubectl get hpa -n tlsoc
-
-# Describe Logstash HPA for detailed scaling history and events
-kubectl describe hpa logstash-hpa -n tlsoc
 
 # Check KEDA ScaledObject status (is it connected to Kafka?)
 kubectl get scaledobject -n tlsoc
@@ -748,10 +728,7 @@ helm upgrade tlsoc ./helm/tlsoc
 ### Scaling
 ```bash
 # Manually force FOSS-Engine to 3 replicas (KEDA will override this within ~30 seconds)
-kubectl scale deployment foss-engine -n tlsoc --replicas=3
-
-# Manually scale Logstash to 2 replicas (HPA will override based on CPU load)
-kubectl scale deployment logstash -n tlsoc --replicas=2
+kubectl scale statefulset foss-engine -n tlsoc --replicas=3
 
 # Permanently change min/max replicas — edit values.yaml and upgrade:
 helm upgrade tlsoc ./helm/tlsoc
@@ -889,20 +866,6 @@ kubectl logs kafka-0 -n tlsoc --tail=100
 # Nuclear option: delete Kafka data and restart
 kubectl delete pvc kafka-data-kafka-0 -n tlsoc
 kubectl delete pod kafka-0 -n tlsoc
-```
-
-### 9. HPA not scaling (always shows `<unknown>` for CPU)
-**Why:** The K3s Metrics Server is not deployed or not responding.
-**The Fix:**
-```bash
-# Check if metrics-server is running
-kubectl get pods -n kube-system | grep metrics
-
-# If not present, K3s usually includes it. Restart K3s:
-sudo systemctl restart k3s
-
-# Verify metrics are flowing
-kubectl top pods -n tlsoc
 ```
 
 ### 10. Longhorn Volumes stuck in "Degraded"

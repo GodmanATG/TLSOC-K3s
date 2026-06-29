@@ -37,19 +37,7 @@ spec:
   updatePolicy:
     updateMode: "Off"
 ---
-apiVersion: autoscaling.k8s.io/v1
-kind: VerticalPodAutoscaler
-metadata:
-  name: logstash-vpa
-  namespace: tlsoc
-spec:
-  targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: logstash
-  updatePolicy:
-    updateMode: "Off"
----
+
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:

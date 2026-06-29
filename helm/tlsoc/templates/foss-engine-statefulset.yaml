@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: foss-engine
+  namespace: tlsoc
+spec:
+  serviceName: "foss-engine"
+  replicas: {{ .Values.foss_engine.replicas }}
+  selector:
+    matchLabels:
+      app: foss-engine
+  template:
+    metadata:
+      labels:
+        app: foss-engine
+    spec:
+      terminationGracePeriodSeconds: 60
+      initContainers:
+        - name: fix-permissions
+          image: busybox
+          command: ["sh", "-c", "chmod -R 777 /archive && chmod -R 777 /app/logs && chmod -R 777 /var/log/soc_output"]
+          volumeMounts:
+            - name: archive-storage
+              mountPath: /archive
+            - name: engine-logs
+              mountPath: /app/logs
+            - name: parser-output
+              mountPath: /var/log/soc_output
+      containers:
+        - name: foss-engine
+          image: foss-soc-engine:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: {{ .Values.foss_engine.resources.requests.cpu | quote }}
+              memory: {{ .Values.foss_engine.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.foss_engine.resources.limits.cpu | quote }}
+              memory: {{ .Values.foss_engine.resources.limits.memory | quote }}
+          env:
+            - name: REDIS_HOST
+              value: "redis.tlsoc.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+          volumeMounts:
+            - name: parser-output
+              mountPath: /var/log/soc_output
+            - name: engine-logs
+              mountPath: /app/logs
+            - name: engine-config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+        - name: logstash
+          image: docker.elastic.co/logstash/logstash:8.19.12
+          resources:
+            requests:
+              cpu: {{ .Values.logstash.resources.requests.cpu | quote }}
+              memory: {{ .Values.logstash.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.logstash.resources.limits.cpu | quote }}
+              memory: {{ .Values.logstash.resources.limits.memory | quote }}
+          env:
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tlsoc-es-elastic-user
+                  key: elastic
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "60"]
+          volumeMounts:
+            - name: parser-output
+              mountPath: /parser_output
+            - name: archive-storage
+              mountPath: /archive
+            - name: logstash-pipeline
+              mountPath: /usr/share/logstash/pipeline/kafka-to-es.conf
+              subPath: kafka-to-es.conf
+            - name: logstash-settings
+              mountPath: /usr/share/logstash/config/logstash.yml
+              subPath: logstash.yml
+            - name: logstash-settings
+              mountPath: /usr/share/logstash/config/pipelines.yml
+              subPath: pipelines.yml
+            - name: elasticsearch-certs
+              mountPath: /usr/share/logstash/config/certs
+              readOnly: true
+      volumes:
+        - name: elasticsearch-certs
+          secret:
+            secretName: tlsoc-es-http-certs-public
+        - name: archive-storage
+          hostPath:
+            path: /var/log/tlsoc-archives
+            type: DirectoryOrCreate
+        - name: engine-logs
+          hostPath:
+            path: /var/log/tlsoc-engine-logs
+            type: DirectoryOrCreate
+        - name: engine-config
+          configMap:
+            name: engine-config
+        - name: logstash-pipeline
+          configMap:
+            name: logstash-config
+            items:
+              - key: kafka-to-es.conf
+                path: kafka-to-es.conf
+        - name: logstash-settings
+          configMap:
+            name: logstash-config
+            items:
+              - key: logstash.yml
+                path: logstash.yml
+              - key: pipelines.yml
+                path: pipelines.yml
+  volumeClaimTemplates:
+  - metadata:
+      name: parser-output
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "longhorn"
+      resources:
+        requests:
+          storage: 5Gi

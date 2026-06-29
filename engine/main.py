@@ -60,6 +60,12 @@ except Exception as e:
     logger.critical(f"Failed to initialize registry: {e}")
     sys.exit(1)
 
+file_handles = {}
+def get_handle(filepath):
+    if filepath not in file_handles:
+        file_handles[filepath] = open(filepath, "a")
+    return file_handles[filepath]
+
 def write_dlq(raw_log, program, error):
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -68,8 +74,9 @@ def write_dlq(raw_log, program, error):
         "raw": raw_log,
     }
     try:
-        with open(os.path.join(LOG_DIR, "dlq.json"), "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        pod_name = os.environ.get('HOSTNAME', 'unknown')
+        f = get_handle(os.path.join(LOG_DIR, f"dlq-{pod_name}.json"))
+        f.write(json.dumps(entry) + "\n")
     except Exception as e:
         logger.error(f"DLQ write failed: {e}")
 
@@ -136,7 +143,8 @@ class HealthMonitor:
         }
 
         try:
-            with open(os.path.join(LOG_DIR, "stats.json"), "w") as f:
+            pod_name = os.environ.get('HOSTNAME', 'unknown')
+            with open(os.path.join(LOG_DIR, f"stats-{pod_name}.json"), "w") as f:
                 json.dump(stats, f)
             logger.info(f"Stats: {stats['eps']} EPS, {stats['total_processed']} processed, {stats['errors_last_min']} errors")
         except Exception:
@@ -161,14 +169,9 @@ def flush_batch(batch):
 
     for module, lines in files.items():
         try:
-            filepath = os.path.join(OUTPUT_DIR, f"{module}.json")
-            with open(filepath, "a") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                try:
-                    f.write("\n".join(lines) + "\n")
-                    f.flush()
-                finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            pod_name = os.environ.get('HOSTNAME', 'unknown')
+            f = get_handle(os.path.join(OUTPUT_DIR, f"{module}-{pod_name}.json"))
+            f.write("\n".join(lines) + "\n")
         except Exception as e:
             logger.error(f"Batch write failed for {module}: {e}")
 
