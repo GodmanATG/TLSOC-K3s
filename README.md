@@ -133,7 +133,15 @@ helm repo update
 helm upgrade --install elastic-operator elastic/eck-operator -n elastic-system --create-namespace
 ```
 
-### Step 5 — Install KEDA (Event-Driven Autoscaler)
+### Step 5 — Install Cert-Manager (Automated TLS Certificates)
+Cert-Manager acts as an internal Certificate Authority that dynamically provisions and automatically rotates TLS certificates for Kafka, Kibana, and Logstash.
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
+```
+
+### Step 6 — Install KEDA (Event-Driven Autoscaler)
 KEDA scales the FOSS-Engine based on Kafka consumer lag instead of CPU. It watches your Kafka broker and automatically spins up more FOSS-Engine pods when logs pile up.
 ```bash
 helm repo add kedacore https://kedacore.github.io/charts
@@ -146,7 +154,7 @@ kubectl get pods -n keda
 
 > **Note:** KEDA auto-scaling is configured centrally via `values.yaml`. By default, it connects to the internal cluster Kafka. If you are using an external Kafka broker, update `kafka.host` and `kafka.port` in `values.yaml` before deploying.
 
-### Step 6 — Install VPA (Vertical Pod Autoscaler)
+### Step 7 — Install VPA (Vertical Pod Autoscaler)
 VPA silently monitors all 6 services and generates ideal CPU/RAM recommendations without ever restarting your pods (it's in observation mode).
 ```bash
 # Clone the official Kubernetes autoscaler repository
@@ -162,7 +170,7 @@ kubectl get pods -n kube-system | grep vpa
 
 > **Note:** VPA stores its data in `kube-system`. After installing, deploy the Helm chart (next step) and wait 10-15 minutes. VPA will then start generating resource recommendations for your pods.
 
-### Step 7 — Build the FOSS-SOC Engine Docker Image
+### Step 8 — Build the FOSS-SOC Engine Docker Image
 The FOSS-SOC Engine is **not** available on Docker Hub. You must build it locally from the source code in the `engine/` directory. This image must be built on **every machine** that will run FOSS-Engine pods (the Master node and all Worker nodes).
 
 ```bash
@@ -186,7 +194,7 @@ sudo docker build -t foss-soc-engine:latest \
 > ```
 > Run this command every time you rebuild the FOSS-Engine image!
 
-### Step 8 — Configure & Deploy TLSOC via Helm
+### Step 9 — Configure & Deploy TLSOC via Helm
 By default, the stack is perfectly configured to use the internal Kafka broker running inside Kubernetes. 
 
 If you ever decide to use a dedicated external Kafka broker, simply open `helm/tlsoc/values.yaml` and update the `kafka.host` and `kafka.port` values. You no longer need to edit any YAML templates directly!
@@ -419,9 +427,12 @@ When adding nodes, you might see red warning icons in the Longhorn UI under Node
 | Automatic Salvage | `Enabled` | If all replicas go faulty (e.g., all nodes lost power simultaneously), Longhorn will try to recover the most intact replica automatically. |
 | Auto Delete Workload Pod on Detach | `Enabled` | If a node crashes and the volume detaches, Kubernetes will auto-kill and respawn the pod on a healthy node where a backup replica exists. |
 | Storage Over Provisioning % | `100` | Prevents Longhorn from promising more storage than physically exists. |
+| Pod Deletion Policy When Node is Down | `delete-statefulset-pod` | Fixes the "Volumes stuck in Attaching" issue. Auto-kills stuck pods on crashed laptops so volumes can safely jump to a healthy node without human intervention. |
 
 ### Troubleshooting Longhorn
 * **Volumes Stuck in "Degraded":** A node disconnected. Longhorn is warning you that it doesn't have enough physical copies. Reconnect the node, or delete the dead replica in the UI so Longhorn can rebuild it on a healthy node.
+* **Volumes Stuck in "Attaching" (StatefulSet Split-Brain):** When a node crashes abruptly (e.g., a laptop loses Wi-Fi), Kubernetes StatefulSets will **never** automatically move the pod to a new node. This prevents a "split-brain" scenario where two nodes write to the same `ReadWriteOnce` volume and corrupt the database. The pod gets permanently stuck in `Terminating` on the dead node, and Longhorn gets stuck in `Attaching` because it cannot mount until the old pod is truly dead. 
+  * *Fix:* Go to the Longhorn UI → **Settings** → **General**. Scroll down to **Pod Deletion Policy When Node is Down** and change it to `delete-statefulset-pod`. This automates the fix: Longhorn will realize the node is dead and trigger a force-delete of the stuck pod, allowing the volume to instantly and safely jump to a healthy node.
 * **Volumes Stuck in "Detached":** Ensure the Pod is actively scheduled. If a node crashes, enable the setting `Automatically Delete Workload Pod when Volume Detaches` so Kubernetes forces the Pod to respawn on a healthy node where the backup replica lives.
 * **"Scheduling Failure" on a Volume:** The remaining nodes don't have enough free storage. Either free up space or add another node.
 * **Red warnings for `KernelModulesLoaded` or `RequiredPackages`:** Install the missing dependencies: `sudo apt-get install -y open-iscsi nfs-common`. If the node still shows the warning but the overall status is `Ready`, Longhorn is falling back to basic block storage and will still work.
