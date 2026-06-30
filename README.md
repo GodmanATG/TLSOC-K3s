@@ -31,6 +31,7 @@ Logstash operates under a strict Zero-Trust model. The `/parser_output` volume c
 | **ECK Operator** | Database Management | The official Elastic Kubernetes Operator automatically handles Elasticsearch cluster formation, auto-healing dead nodes, generating secure passwords, and provisioning internal TLS certificates seamlessly. |
 | **Kafka & Redis** | Data Brokering | Kafka acts as an ultra-fast shock absorber. If 50,000 logs arrive instantly during a DDoS attack, Kafka holds them in a queue so the FOSS-Engine isn't overwhelmed. Redis acts as a short-term memory state store for multi-line log parsing. |
 | **Traefik** | Ingress Routing | Replaces `port-forwarding`. Traefik intercepts incoming web traffic, cleanly terminates HTTPS SSL certificates, and routes you directly to Kibana at `kibana.tlsoc.local`. |
+| **Cert-Manager** | Security (TLS) | Acts as an internal Certificate Authority that dynamically provisions and automatically rotates TLS certificates for Kafka, Kibana, and Logstash. Eliminates manual certificate management. |
 | **KEDA** | Event-Driven Auto-Scaling | Scales the FOSS-Engine based on real Kafka consumer lag. When thousands of unread logs pile up on the Kafka broker, KEDA spins up more FOSS-Engine pods to burn through the backlog instantly. Far more precise than CPU-based scaling for queue-driven workloads. |
 | **VPA** | Vertical Resource Tuning | Watches all 6 services in observation mode and generates mathematically perfect CPU/RAM recommendations based on actual historical usage. Use its output to tune `values.yaml` and prevent OOM-kills or resource starvation. |
 
@@ -879,9 +880,7 @@ kubectl delete pvc kafka-data-kafka-0 -n tlsoc
 kubectl delete pod kafka-0 -n tlsoc
 ```
 
-### 10. Longhorn Volumes stuck in "Degraded"
-**Why:** A node was removed or went offline, and Longhorn lost a replica.
-**The Fix:** Open the Longhorn UI, click the volume, and delete the dead replica. If `Default Replica Count` is higher than the number of healthy nodes, reduce it.
+
 
 ### 11. PVC stuck in `Pending` state
 **Why:** No StorageClass can satisfy the claim, or Longhorn is not installed.
@@ -1050,7 +1049,7 @@ engine/
 ```
 
 ### Building the Image
-See [Step 5 — Build the FOSS-SOC Engine Docker Image](#step-5--build-the-foss-soc-engine-docker-image) in the Installation Guide above.
+See [Step 8 — Build the FOSS-SOC Engine Docker Image](#step-8--build-the-foss-soc-engine-docker-image) in the Installation Guide above.
 
 ### Key Configuration (ConfigMap vs config.yaml)
 The `engine/config.yaml` file is for **local development only**. When running inside Kubernetes, the engine's config is overridden by the `engine-config` ConfigMap defined in `helm/tlsoc/templates/configmaps.yaml`. This ConfigMap sets:
