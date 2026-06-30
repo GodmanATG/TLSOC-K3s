@@ -6,19 +6,15 @@ Welcome to the TLSOC K3s deployment repository. This project represents a massiv
 
 ## 🏗️ How Our Stack Works
 
-The TLSOC architecture is designed to ingest massive volumes of security logs (from web servers, firewalls, and mail servers), parse them at high speed using a custom Python engine, and visualize threats in Kibana. 
+The TLSOC architecture is engineered to ingest massive volumes of raw security logs from endpoints across your network, parse them at lightning speed using a horizontally scaling Python engine, and securely visualize the normalized threats in Kibana. We achieve this by replacing heavy endpoint agents with native OS tools, leveraging `rsyslog` and `omkafka`.
 
-The flow of data looks like this:
-1. **Target Machines (Filebeat)** send raw logs to the central **Kafka** Message Broker.
-2. The **FOSS-Engine** (our custom Python parsing engine) reads the raw logs from Kafka topics (`webserver`, `mailserver`, etc.), normalizes them against our proprietary SIEM rules, and drops structured `.json` files onto a persistent hard drive.
-3. **Logstash** (running as a Sidecar container in the exact same pod) monitors that hard drive, instantly picks up the new `.json` files, and securely pipes them into **Elasticsearch**.
-4. Security Analysts log into **Kibana** (via Traefik Ingress) to view real-time dashboards and trigger alerts.
+The complete data pipeline operates seamlessly:
+1. **Target Machines (`rsyslog` + `omkafka`)**: Rather than installing heavy agents, target Linux machines use their native `rsyslog` daemon equipped with the `omkafka` module to forward raw system and application logs directly to the central **Kafka** Message Broker.
+2. **Kafka Shock Absorber**: Kafka securely queues the incoming logs, ensuring that sudden log floods (like a DDoS attack) never overwhelm the parsing engine or drop data.
+3. **The FOSS-Engine**: Our custom Python parsing engine reads raw logs from Kafka topics (e.g., `webserver`, `mailserver`). It applies high-performance regex parsing, normalizes fields to the Elastic Common Schema (ECS), enriches IP addresses with GeoIP locations, and outputs structured `.json` files onto an isolated Longhorn hard drive.
+4. **Logstash Sidecar**: Logstash (running inside the exact same pod as the FOSS-Engine) continuously monitors the hard drive. It instantly detects new `.json` files via block-storage events and securely pipes the structured data directly into **Elasticsearch**.
+5. **Kibana Dashboards**: Security Analysts log into **Kibana** (routed securely via Traefik Ingress) to view real-time SIEM dashboards, hunt for threats, and trigger alerts.
 
-### StatefulSet & RWO Storage Architecture (The Fix for NFS Locks)
-To prevent Linux `inotify` file-watching bugs associated with NFS (ReadWriteMany) network drives, the FOSS-Engine is deployed as a **StatefulSet**. This guarantees that every single FOSS-Engine pod gets its own dedicated, isolated **Longhorn ReadWriteOnce (RWO)** hard drive (`/parser_output`). Because the drive is strictly attached to one pod, Logstash can instantly and reliably detect file changes using native block-storage events.
-
-### Zero-Trust Architecture
-Logstash operates under a strict Zero-Trust model. The `/parser_output` volume containing the critical JSON logs is mounted strictly as `readOnly: true` to Logstash. Logstash's internal file-tracking database (`.sincedb`) is persisted to its own isolated `logstash-state` volume, ensuring that if Logstash is ever compromised, attackers cannot modify or delete the original parsed logs.
 ---
 
 ## 🛠️ Technology Stack (And Why We Chose It)
@@ -104,74 +100,36 @@ export KUBECONFIG=~/.kube/config
 > ```
 > Your node must show `STATUS: Ready` before continuing.
 
-### Step 3 — Install Longhorn (Distributed Storage)
-Longhorn provides resilient, replicated block storage across all nodes. Install it before deploying the SOC stack.
+### Step 3 — Install Cluster Operators
+To power the SOC, we need to install five critical Kubernetes Operators. These act as "robot administrators" that manage storage, databases, autoscaling, and security automatically.
+
 ```bash
-# 1.First, install the storage networking dependencies required for Longhorn volume replication:
-sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup
-sudo systemctl enable --now iscsid
-sudo modprobe iscsi_tcp
-echo "iscsi_tcp" | sudo tee -a /etc/modules
+# 1. Install Longhorn (Distributed Block Storage)
+helm repo add longhorn https://charts.longhorn.io && helm repo update
+helm install longhorn longhorn/longhorn --namespace longhorn-system --create-namespace --set defaultSettings.defaultReplicaCount=1
 
-# 2. Install Longhorn via Helm
-helm repo add longhorn https://charts.longhorn.io
-helm repo update
-helm install longhorn longhorn/longhorn \
-  --namespace longhorn-system \
-  --create-namespace \
-  --set defaultSettings.defaultReplicaCount=1
-
-# 3. Wait for all Longhorn pods to become Ready (~2-3 minutes)
-kubectl -n longhorn-system get pods -w
-```
-> **Note:** We set `defaultReplicaCount=1` for single-node setups. For multi-node clusters with redundancy, change this to `2` or `3`.
-
-### Step 4 — Install the Elastic ECK Operator
-Before deploying the SOC, you must install the Elastic Operator. This "robot administrator" will automatically build and secure your databases.
-```bash
-helm repo add elastic https://helm.elastic.co
-helm repo update
+# 2. Install Elastic ECK (Database Manager)
+helm repo add elastic https://helm.elastic.co && helm repo update
 helm upgrade --install elastic-operator elastic/eck-operator -n elastic-system --create-namespace
-```
 
-### Step 5 — Install Cert-Manager (Automated TLS Certificates)
-Cert-Manager acts as an internal Certificate Authority that dynamically provisions and automatically rotates TLS certificates for Kafka, Kibana, and Logstash.
-```bash
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
+# 3. Install Cert-Manager (Automated TLS Certificates)
+helm repo add jetstack https://charts.jetstack.io && helm repo update
 helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
-```
 
-### Step 6 — Install KEDA (Event-Driven Autoscaler)
-KEDA scales the FOSS-Engine based on Kafka consumer lag instead of CPU. It watches your Kafka broker and automatically spins up more FOSS-Engine pods when logs pile up.
-```bash
-helm repo add kedacore https://kedacore.github.io/charts
-helm repo update
+# 4. Install KEDA (Event-Driven Autoscaler for Kafka lag)
+helm repo add kedacore https://kedacore.github.io/charts && helm repo update
 helm install keda kedacore/keda --namespace keda --create-namespace
 
-# Verify KEDA pods are running (should show 3 pods: operator, metrics-apiserver, admission-webhooks)
-kubectl get pods -n keda
-```
-
-> **Note:** KEDA auto-scaling is configured centrally via `values.yaml`. By default, it connects to the internal cluster Kafka. If you are using an external Kafka broker, update `kafka.host` and `kafka.port` in `values.yaml` before deploying.
-
-### Step 7 — Install VPA (Vertical Pod Autoscaler)
-VPA silently monitors all 6 services and generates ideal CPU/RAM recommendations without ever restarting your pods (it's in observation mode).
-```bash
-# Clone the official Kubernetes autoscaler repository
+# 5. Install VPA (Vertical Pod Autoscaler for CPU/RAM tuning)
 git clone https://github.com/kubernetes/autoscaler.git /tmp/autoscaler
-
-# Run the official VPA installer
 cd /tmp/autoscaler/vertical-pod-autoscaler
 sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml ./hack/vpa-up.sh
-
-# Verify VPA pods are running (should show 3 pods: recommender, updater, admission-controller)
-kubectl get pods -n kube-system | grep vpa
 ```
 
-> **Note:** VPA stores its data in `kube-system`. After installing, deploy the Helm chart (next step) and wait 10-15 minutes. VPA will then start generating resource recommendations for your pods.
+> **Note on Longhorn:** We set `defaultReplicaCount=1` for single-node setups. For multi-node clusters with redundancy, change this to `2` or `3` in the Longhorn UI.
+> **Note on Autoscaling:** VPA runs silently in observation mode (view recommendations via `kubectl describe vpa -n tlsoc`). KEDA auto-scales based on the `kafka` settings in your `values.yaml`.
 
-### Step 8 — Build the FOSS-SOC Engine Docker Image
+### Step 4 — Build the FOSS-SOC Engine Docker Image
 The FOSS-SOC Engine is **not** available on Docker Hub. You must build it locally from the source code in the `engine/` directory. This image must be built on **every machine** that will run FOSS-Engine pods (the Master node and all Worker nodes).
 
 ```bash
@@ -195,7 +153,7 @@ sudo docker build -t foss-soc-engine:latest \
 > ```
 > Run this command every time you rebuild the FOSS-Engine image!
 
-### Step 9 — Configure & Deploy TLSOC via Helm
+### Step 5 — Configure & Deploy TLSOC via Helm
 By default, the stack is perfectly configured to use the internal Kafka broker running inside Kubernetes. 
 
 If you ever decide to use a dedicated external Kafka broker, simply open `helm/tlsoc/values.yaml` and update the `kafka.host` and `kafka.port` values. You no longer need to edit any YAML templates directly!
@@ -206,6 +164,38 @@ helm install tlsoc ./helm/tlsoc
 ```
 
 *Note: The `tlsoc-setup` Kubernetes Job will automatically wait for Elasticsearch and Kibana to become healthy, and then it will execute API calls to dynamically inject all Dashboards, SIEM Rules, and Data Views into Kibana.*
+
+---
+
+## 📡 Connecting Target Endpoints (rsyslog + omkafka)
+
+To send logs from a target Linux machine (e.g., a web server or firewall) into your SOC, you do not need to install heavy agents like Filebeat. Instead, use the native `rsyslog` daemon.
+
+**1. Install the Kafka Output Module**
+```bash
+sudo apt update && sudo apt install rsyslog-kafka
+```
+
+**2. Configure Rsyslog to Forward to Kafka**
+Create a new configuration file on the target machine: `sudo nano /etc/rsyslog.d/99-kafka.conf`
+```text
+# Load the omkafka module
+module(load="omkafka")
+
+# Forward all auth logs (SSH, Sudo) to the 'linux_auth' Kafka topic
+auth,authpriv.* action(
+    type="omkafka"
+    topic="linux_auth"
+    broker=["<YOUR_K3S_MASTER_IP>:9094"]
+    confParam=["security.protocol=PLAINTEXT"]
+)
+```
+
+**3. Restart Rsyslog**
+```bash
+sudo systemctl restart rsyslog
+```
+Your target machine is now instantly shipping raw logs to the SOC!
 
 ---
 
@@ -321,7 +311,7 @@ When a Pod requests a Persistent Volume Claim (PVC), Longhorn creates a hidden "
 Longhorn does **NOT** split data across nodes. If you have a 5GB PVC, the entire 5GB block lives on one node. To get redundancy, Longhorn creates complete copies (replicas) of the entire block on other nodes. Actual data distribution (sharding) is handled by the database software itself (e.g., Elasticsearch clusters).
 
 ### Installation
-See [Step 3 — Install Longhorn](#step-3--install-longhorn-distributed-storage) in the Installation Guide above.
+See [Step 3 — Install Cluster Operators](#step-3--install-cluster-operators) in the Installation Guide above.
 
 ### When to Use Longhorn
 * **Multi-Node Laptop Clusters:** If you have 2+ nodes, Longhorn is mandatory. It ensures that if one laptop loses power, your databases survive. It provides high-speed Block-Level storage (iSCSI) required by databases.
@@ -336,10 +326,8 @@ See [Step 3 — Install Longhorn](#step-3--install-longhorn-distributed-storage)
 
 1. **Uninstall Longhorn:**
    ```bash
-   # First, delete all PVCs that use Longhorn
-   kubectl delete pvc parser-output logstash-state foss-engine-logs -n tlsoc
-   kubectl delete pvc kafka-data-kafka-0 redis-data-redis-0 -n tlsoc
-   kubectl delete pvc elasticsearch-data-tlsoc-es-default-0 -n tlsoc
+   # First, delete all PVCs to release the Longhorn volumes
+   kubectl delete pvc --all -n tlsoc
    
    # Uninstall Longhorn
    helm uninstall longhorn -n longhorn-system
@@ -349,10 +337,11 @@ See [Step 3 — Install Longhorn](#step-3--install-longhorn-distributed-storage)
 
    | File | What to Change |
    |---|---|
-   | `helm/tlsoc/templates/shared-pvc.yaml` | Change `storageClassName: "longhorn"` → `"local-path"` **AND** change `accessModes` from `ReadWriteMany` → `ReadWriteOnce` (3 PVCs in this file) |
+   | `helm/tlsoc/templates/foss-engine-statefulset.yaml` | Change `storageClassName: "longhorn"` → `"local-path"` (in the `volumeClaimTemplates` section) |
    | `helm/tlsoc/templates/kafka.yaml` | Change `storageClassName: "longhorn"` → `"local-path"` |
    | `helm/tlsoc/templates/redis.yaml` | Change `storageClassName: "longhorn"` → `"local-path"` |
-   | `helm/tlsoc/templates/elastic.yaml` | Change `storageClassName: longhorn` → `local-path` |
+   | `helm/tlsoc/templates/eck.yaml` | Change `storageClassName: longhorn` → `local-path` |
+
 3. **Redeploy:**
    ```bash
    helm upgrade tlsoc ./helm/tlsoc
@@ -403,7 +392,7 @@ When adding nodes, you might see red warning icons in the Longhorn UI under Node
   ```
 
 **2. `RequiredPackages` is Red**
-* **Issue:** The node failed to install the NFS or iSCSI clients automatically (usually due to a locked `apt` process). Without NFS, our stack cannot mount the shared `/parser_output` folder.
+* **Issue:** The node failed to install the iSCSI clients automatically (usually due to a locked `apt` process). Without iSCSI, our stack cannot mount the Longhorn block-storage drives.
 * **Fix:** Run this on the affected node:
   ```bash
   sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup
@@ -846,14 +835,14 @@ sudo docker save foss-soc-engine:latest | sudo k3s ctr images import -
 **The Fix:**
 1. Verify Kafka is running: `kubectl get pods -l app=kafka -n tlsoc`
 2. Check the engine ConfigMap: `kubectl get configmap engine-config -n tlsoc -o yaml`. The `bootstrap_servers` should be `kafka.tlsoc.svc.cluster.local:9092` for in-cluster communication.
-3. Restart the engine: `kubectl rollout restart deployment foss-engine -n tlsoc`
+3. Restart the engine: `kubectl rollout restart statefulset foss-engine -n tlsoc`
 
 ### 6. Logstash not shipping logs to Elasticsearch
-**Why:** Logstash can't reach Elasticsearch, the TLS certificate is wrong, or the Elastic password changed.
+**Why:** Logstash can't reach Elasticsearch, or the Elastic password changed.
 **The Fix:**
-1. Check Logstash logs for errors: `kubectl logs -l app=logstash -n tlsoc --tail=100`
+1. Check Logstash logs (running as a sidecar inside the engine pod): `kubectl logs foss-engine-0 -c logstash -n tlsoc --tail=100`
 2. Verify the ES secret exists: `kubectl get secret tlsoc-es-elastic-user -n tlsoc`
-3. Restart Logstash: `kubectl rollout restart deployment logstash -n tlsoc`
+3. Restart the pod to reset Logstash: `kubectl rollout restart statefulset foss-engine -n tlsoc`
 
 ### 7. Elasticsearch pod stuck in `CrashLoopBackOff`
 **Why:** Elasticsearch ran out of memory (OOM killed), or the disk is full, or the `vm.max_map_count` kernel parameter is too low.
@@ -882,7 +871,7 @@ kubectl delete pod kafka-0 -n tlsoc
 
 
 
-### 11. PVC stuck in `Pending` state
+### 9. PVC stuck in `Pending` state
 **Why:** No StorageClass can satisfy the claim, or Longhorn is not installed.
 **The Fix:**
 ```bash
@@ -894,11 +883,11 @@ kubectl get storageclass
 kubectl describe pvc <pvc-name> -n tlsoc
 ```
 
-### 12. KEDA shows `error describing topics: kafka server: topic does not exist`
+### 10. KEDA shows `error describing topics: kafka server: topic does not exist`
 **Why:** This is expected and harmless. Kafka only creates a topic the moment the first log is sent to it. If no logs are flowing, the topic doesn't exist yet, so KEDA can't measure lag on it. It will resolve automatically when your target machines start sending logs.
 **It is NOT an error** — just a warning that KEDA is idle.
 
-### 13. KEDA ScaledObject shows `Ready: False` / `TriggerError`
+### 11. KEDA ScaledObject shows `Ready: False` / `TriggerError`
 **Why:** KEDA cannot connect to the Kafka broker defined in your `values.yaml`.
 **Solution:**
 1. If using the internal default, ensure the `kafka` statefulset is running.
@@ -1023,7 +1012,17 @@ The Engine opens the corresponding `.yaml` rule file in the `rules/` directory. 
 If the log contains a public IP address (`source.ip`), the Engine performs an ultra-fast local lookup against a **MaxMind GeoLite2** database (`database/GeoLite2-City.mmdb`). It attaches Country, City, and Latitude/Longitude coordinates to the log.
 
 #### Stage 5: Output (Batched File Drop)
-Once the log is a perfectly formatted JSON object, the Engine batches up to **1000 logs** (or waits **5 seconds**, whichever comes first) and drops them as a single `.json` file into the `/var/log/soc_output/` directory. This directory is a shared Longhorn RWX volume (`parser-output` PVC). Logstash monitors this directory, instantly picks up the new files, and securely pipes the structured JSON into Elasticsearch.
+Once the log is a perfectly formatted JSON object, the Engine batches up to **1000 logs** (or waits **5 seconds**, whichever comes first) and drops them as a single `.json` file into the `/parser_output/` directory.
+
+### StatefulSet & RWO Storage Architecture (The Fix for NFS Locks)
+To prevent Linux `inotify` file-watching bugs associated with NFS (ReadWriteMany) network drives, the FOSS-Engine is deployed as a **StatefulSet**. This guarantees that every single FOSS-Engine pod gets its own dedicated, isolated **Longhorn ReadWriteOnce (RWO)** hard drive (`/parser_output`). Because the drive is strictly attached to one pod, Logstash can instantly and reliably detect file changes using native block-storage events.
+
+### Zero-Trust Architecture
+Logstash operates under a strict Zero-Trust model to protect parsed data:
+* The `/parser_output` volume (containing the critical JSON logs) is mounted strictly as `readOnly: true` to Logstash. 
+* Logstash's internal file-tracking database (`.sincedb`) is persisted to its own isolated `logstash-state` volume.
+
+This ensures that if Logstash is ever compromised, attackers cannot modify or delete the original parsed logs.
 
 ### Source Code & Image Build
 
@@ -1049,7 +1048,7 @@ engine/
 ```
 
 ### Building the Image
-See [Step 8 — Build the FOSS-SOC Engine Docker Image](#step-8--build-the-foss-soc-engine-docker-image) in the Installation Guide above.
+See [Step 4 — Build the FOSS-SOC Engine Docker Image](#step-4--build-the-foss-soc-engine-docker-image) in the Installation Guide above.
 
 ### Key Configuration (ConfigMap vs config.yaml)
 The `engine/config.yaml` file is for **local development only**. When running inside Kubernetes, the engine's config is overridden by the `engine-config` ConfigMap defined in `helm/tlsoc/templates/configmaps.yaml`. This ConfigMap sets:
