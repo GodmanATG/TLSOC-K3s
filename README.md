@@ -794,6 +794,22 @@ sudo du -sh /var/lib/longhorn/
 sudo ls -lh /var/lib/longhorn/replicas/
 ```
 
+### 🔍 Advanced Distributed Log Searching (`search_logs.sh`)
+Because the FOSS-Engine uses KEDA to horizontally auto-scale based on Kafka traffic, you might have engine pods that process a bunch of logs and then scale down to zero when idle. If a security analyst wants to search raw output files for a specific IP address, standard `kubectl exec` is useless because the pod might be sleeping and the Longhorn volume is detached.
+
+We wrote `search_logs.sh` to solve this! This script is a powerful SOC debugging tool that can search *across all FOSS-Engine volumes simultaneously*. 
+1. If the engine pod is active, it runs a live regex search inside it.
+2. If the engine pod is scaled down (sleeping), it automatically spins up a temporary debugger pod, attaches the sleeping Longhorn volume, searches it, and then cleanly destroys the debugger pod.
+
+**Usage:**
+```bash
+# Search for a specific IP address
+./search_logs.sh '192.168.1.100'
+
+# Use regex to search for multiple patterns
+./search_logs.sh 'postfix|failed password|root'
+```
+
 ---
 
 ## 🐛 Troubleshooting & Common Bugs

@@ -34,7 +34,7 @@ for PVC in $PVCS; do
     
     if [ "$POD_STATE" == "Running" ]; then
         echo "🟢 [$POD_NAME] is ACTIVE. Searching live container..."
-        kubectl exec -n tlsoc $POD_NAME -c foss-engine -- sh -c "grep -E -H '$PATTERN' /var/log/soc_output/*.json 2>/dev/null"
+        kubectl exec -n tlsoc $POD_NAME -c foss-engine -- sh -c "grep -E -i --color=always -H '$PATTERN' /var/log/soc_output/*.json 2>/dev/null"
     else
         echo "💤 [$POD_NAME] is SCALED DOWN. Spinning up temporary debug pod to read its sleeping volume..."
         DEBUG_POD="debug-$POD_NAME"
@@ -66,7 +66,7 @@ EOF
         
         if [ $? -eq 0 ]; then
             # Execute the regex search inside the temp pod
-            kubectl exec -n tlsoc $DEBUG_POD -- sh -c "grep -E -H '$PATTERN' /data/*.json 2>/dev/null"
+            kubectl exec -n tlsoc $DEBUG_POD -- sh -c "grep -E -i --color=always -H '$PATTERN' /data/*.json 2>/dev/null"
         else
             echo "   ⚠️ Failed to mount volume. It might still be locked by a recently disconnected node."
         fi
