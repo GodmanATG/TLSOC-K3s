@@ -14,7 +14,7 @@ spec:
       labels:
         app: foss-engine
     spec:
-      terminationGracePeriodSeconds: 60
+      terminationGracePeriodSeconds: 35
       initContainers:
         - name: fix-permissions
           image: busybox
@@ -68,7 +68,7 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: ["sleep", "60"]
+                command: ["sleep", "30"]
           volumeMounts:
             - name: parser-output
               mountPath: /parser_output
