@@ -172,6 +172,7 @@ def flush_batch(batch):
             pod_name = os.environ.get('HOSTNAME', 'unknown')
             f = get_handle(os.path.join(OUTPUT_DIR, f"{module}-{pod_name}.json"))
             f.write("\n".join(lines) + "\n")
+            f.flush()
         except Exception as e:
             logger.error(f"Batch write failed for {module}: {e}")
 
@@ -185,7 +186,7 @@ def main():
             bootstrap_servers=config["kafka"]["bootstrap_servers"],
             group_id=config["kafka"]["group_id"],
             auto_offset_reset=config["kafka"]["auto_offset_reset"],
-            enable_auto_commit=True,
+            enable_auto_commit=False,
             max_poll_records=2000,
             value_deserializer=lambda m: m.decode("utf-8", errors="ignore"),
         )
@@ -269,6 +270,7 @@ def main():
             now = time.time()
             if len(batch) >= batch_size or (batch and now - last_flush > batch_timeout):
                 flush_batch(batch)
+                consumer.commit()
                 batch.clear()
                 last_flush = now
 
@@ -277,9 +279,11 @@ def main():
     except KeyboardInterrupt:
         logger.info("Stopping engine...")
         flush_batch(batch)
+        consumer.commit()
         consumer.close()
     except Exception as e:
         logger.critical(f"Fatal error: {e}")
+        flush_batch(batch)
         traceback.print_exc()
 
 if __name__ == "__main__":

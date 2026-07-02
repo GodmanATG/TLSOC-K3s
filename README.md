@@ -41,12 +41,12 @@ Because Elasticsearch and Java applications require significant memory, we have 
 * **OS:** Linux (Ubuntu 22.04+ recommended)
 * **RAM:** 8 GB (Elasticsearch requires a minimum 2GB heap, plus OS overhead)
 * **CPU:** 4 Cores
-* **Storage:** 20 GB free space
+* **Storage:** 30 GB+ free space (Container images and distributed block storage require significant overhead)
 
 ### Recommended Specs (Production & High Availability)
 * **RAM:** 16 GB+
 * **CPU:** 8 Cores
-* **Storage:** 50 GB+ SSD
+* **Storage:** 100 GB+ SSD
 * **Network:** Static IP for external Log Producers to reach Kafka.
 
 ---
@@ -71,7 +71,9 @@ sudo systemctl stop multipathd.socket multipathd.service 2>/dev/null || true
 sudo systemctl disable multipathd.socket multipathd.service 2>/dev/null || true
 sudo systemctl mask multipathd.socket multipathd.service 2>/dev/null || true
 sudo modprobe iscsi_tcp
+sudo modprobe dm_crypt
 echo "iscsi_tcp" | sudo tee -a /etc/modules
+echo "dm_crypt" | sudo tee -a /etc/modules
 sudo systemctl enable --now iscsid
 
 # 3. Install Helm
@@ -385,7 +387,9 @@ When adding nodes, you might see red warning icons in the Longhorn UI under Node
   ```bash
   sudo apt-get update && sudo apt-get install -y linux-modules-extra-$(uname -r)
   sudo modprobe iscsi_tcp
+  sudo modprobe dm_crypt
   echo "iscsi_tcp" | sudo tee -a /etc/modules
+  echo "dm_crypt" | sudo tee -a /etc/modules
   sudo systemctl restart iscsid
   sudo systemctl enable iscsid
   kubectl delete pod -n longhorn-system -l app=longhorn-manager
@@ -649,10 +653,10 @@ kubectl get pvc -n tlsoc
 Because FOSS-Engine runs as a StatefulSet with isolated ReadWriteOnce volumes, you must `exec` into a specific pod to see its parsed JSON files:
 ```bash
 # View parsed logs inside pod 0
-kubectl exec -it foss-engine-0 -n tlsoc -c foss-engine -- tail -f /var/log/soc_output/webserver.json
+kubectl exec -it foss-engine-0 -n tlsoc -c foss-engine -- tail -f /parser_output/webserver.json
 
 # View parsed logs inside pod 1 (if KEDA has scaled up)
-kubectl exec -it foss-engine-1 -n tlsoc -c foss-engine -- tail -f /var/log/soc_output/webserver.json
+kubectl exec -it foss-engine-1 -n tlsoc -c foss-engine -- tail -f /parser_output/webserver.json
 ```
 
 ### Storage Maintenance

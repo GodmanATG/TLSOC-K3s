@@ -14,7 +14,7 @@ spec:
       labels:
         app: foss-engine
     spec:
-      terminationGracePeriodSeconds: 35
+      terminationGracePeriodSeconds: 45
       initContainers:
         - name: fix-permissions
           image: busybox
@@ -42,6 +42,10 @@ spec:
               value: "redis.tlsoc.svc.cluster.local"
             - name: REDIS_PORT
               value: "6379"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
           volumeMounts:
             - name: parser-output
               mountPath: /var/log/soc_output
