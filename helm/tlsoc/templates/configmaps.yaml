@@ -71,8 +71,8 @@ metadata:
 data:
   config.yaml: |
     kafka:
-      bootstrap_servers: ["{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"]
-      input_topic: "^(webserver|vulnerability|mailserver|proxyserver|summersoc|.*)$"
+      bootstrap_servers: ["kafka.tlsoc.svc.cluster.local:9092"]
+      input_topic: "^(webserver|vulnerability|mailserver|proxyserver|summersoc)$"
       group_id: "foss-soc-engine"
       auto_offset_reset: "earliest"
     batch:
@@ -89,6 +89,7 @@ data:
       waf-nginx-access: "apache_access"
       mail_apache_access: "apache_access"
       web_apache_access: "apache_access"
+      webapt: "apache_access"
       modsec_audit_log: "modsec"
       postfix: "postfix"
       roundcube_login: "roundcube"

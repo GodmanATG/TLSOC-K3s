@@ -160,6 +160,9 @@ By default, the stack is perfectly configured to use the internal Kafka broker r
 
 If you ever decide to use a dedicated external Kafka broker, simply open `helm/tlsoc/values.yaml` and update the `kafka.host` and `kafka.port` values. You no longer need to edit any YAML templates directly!
 
+> **⚠️ DEPLOYMENT WARNING:** 
+> Do **NOT** bypass Helm by manually generating templates and running `kubectl apply -f`. If you deploy via `kubectl apply`, template variables like `{{ .Values.kafka.host }}` will not be interpolated and will be injected as literal strings, which will break the external Kafka network routing and prevent target machines from sending logs. **Always use Helm** to deploy or upgrade the stack.
+
 Deploy the entire stack:
 ```bash
 helm install tlsoc ./helm/tlsoc
@@ -544,7 +547,7 @@ logstash:
   # Logstash runs as a sidecar to FOSS-Engine, so it shares the same replica count.
   resources:
     requests: { memory: "512Mi", cpu: "200m" }  # VPA recommends ~78m CPU, ~1.2Gi memory.
-    limits:   { memory: "1Gi",   cpu: "500m" }  # ⚠️ VPA says memory limit is too tight — raise to 1.5Gi.
+    limits:   { memory: "1.5Gi",   cpu: "500m" }
 
 foss_engine:
   replicas: 1          # Starting replicas. KEDA will scale this up/down automatically.

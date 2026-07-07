@@ -18,7 +18,7 @@ kafka:
   input_topic: "^(webserver|vulnerability|mailserver|proxyserver|summersoc|.*)$"
 
   group_id: "aryan-windows"
-  auto_offset_reset: "latest"
+  auto_offset_reset: "earliest"
 
 batch:
   # Performance tuning: Write to disk every 1000 logs OR every 5 seconds
