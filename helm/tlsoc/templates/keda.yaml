@@ -22,28 +22,28 @@ spec:
   # Set maxReplicaCount to match the number of Kafka topic partitions for true parallelism.
   - type: kafka
     metadata:
-      bootstrapServers: "{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"
+      bootstrapServers: "kafka.tlsoc.svc.cluster.local:9092"
       consumerGroup: "foss-soc-engine"
       topic: "summersoc"
       lagThreshold: "100"
       offsetResetPolicy: "latest"
   - type: kafka
     metadata:
-      bootstrapServers: "{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"
+      bootstrapServers: "kafka.tlsoc.svc.cluster.local:9092"
       consumerGroup: "foss-soc-engine"
       topic: "webserver"
       lagThreshold: "100"
       offsetResetPolicy: "latest"
   - type: kafka
     metadata:
-      bootstrapServers: "{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"
+      bootstrapServers: "kafka.tlsoc.svc.cluster.local:9092"
       consumerGroup: "foss-soc-engine"
       topic: "mailserver"
       lagThreshold: "100"
       offsetResetPolicy: "latest"
   - type: kafka
     metadata:
-      bootstrapServers: "{{ .Values.kafka.host }}:{{ .Values.kafka.port }}"
+      bootstrapServers: "kafka.tlsoc.svc.cluster.local:9092"
       consumerGroup: "foss-soc-engine"
       topic: "vulnerability"
       lagThreshold: "100"
