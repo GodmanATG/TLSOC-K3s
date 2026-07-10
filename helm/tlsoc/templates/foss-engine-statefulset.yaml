@@ -14,6 +14,16 @@ spec:
       labels:
         app: foss-engine
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - foss-engine
+              topologyKey: "kubernetes.io/hostname"
       terminationGracePeriodSeconds: 45
       initContainers:
         - name: fix-permissions
@@ -73,6 +83,25 @@ spec:
             preStop:
               exec:
                 command: ["sleep", "30"]
+          startupProbe:
+            httpGet:
+              path: /
+              port: 9600
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9600
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 9600
+            periodSeconds: 30
+            failureThreshold: 3
           volumeMounts:
             - name: parser-output
               mountPath: /parser_output

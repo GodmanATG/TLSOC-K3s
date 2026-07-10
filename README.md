@@ -12,7 +12,7 @@ The complete data pipeline operates seamlessly:
 1. **Target Machines (`rsyslog` + `omkafka`)**: Rather than installing heavy agents, target Linux machines use their native `rsyslog` daemon equipped with the `omkafka` module to forward raw system and application logs directly to the central **Kafka** Message Broker.
 2. **Kafka Shock Absorber**: Kafka securely queues the incoming logs, ensuring that sudden log floods (like a DDoS attack) never overwhelm the parsing engine or drop data.
 3. **The FOSS-Engine**: Our custom Python parsing engine reads raw logs from Kafka topics (e.g., `webserver`, `mailserver`). It applies high-performance regex parsing, normalizes fields to the Elastic Common Schema (ECS), enriches IP addresses with GeoIP locations, and outputs structured `.json` files onto an isolated Longhorn hard drive.
-4. **Logstash Sidecar**: Logstash (running inside the exact same pod as the FOSS-Engine) continuously monitors the hard drive. It instantly detects new `.json` files via block-storage events and securely pipes the structured data directly into **Elasticsearch**.
+4. **Logstash Sidecar**: Logstash (running inside the exact same pod as the FOSS-Engine) continuously monitors the hard drive. It instantly detects new `.json` files via Linux inotify filesystem events and securely pipes the structured data directly into **Elasticsearch**.
 5. **Kibana Dashboards**: Security Analysts log into **Kibana** (routed securely via Traefik Ingress) to view real-time SIEM dashboards, hunt for threats, and trigger alerts.
 
 ---
@@ -25,11 +25,12 @@ The complete data pipeline operates seamlessly:
 | **Helm** | Package Management | Replaces static YAML files. Allows us to dynamically inject passwords, scale replicas, and configure the entire cluster from a single `values.yaml` file. |
 | **Longhorn** | Distributed Storage | Provides highly available, block-level storage across all worker nodes. Pools storage across laptops and allows databases to seamlessly migrate or survive if a node crashes. |
 | **ECK Operator** | Database Management | The official Elastic Kubernetes Operator automatically handles Elasticsearch cluster formation, auto-healing dead nodes, generating secure passwords, and provisioning internal TLS certificates seamlessly. |
-| **Kafka & Redis** | Data Brokering | Kafka acts as an ultra-fast shock absorber. If 50,000 logs arrive instantly during a DDoS attack, Kafka holds them in a queue so the FOSS-Engine isn't overwhelmed. Redis acts as a short-term memory state store for multi-line log parsing. |
+| **Kafka** | Message Brokering | Acts as an ultra-fast shock absorber. If 50,000 logs arrive instantly during a DDoS attack, Kafka holds them in a queue so the FOSS-Engine isn't overwhelmed. |
+| **Redis** | State Management | A short-term memory state store for multi-line log parsing (e.g., Postfix transaction buffering). |
 | **Traefik** | Ingress Routing | Replaces `port-forwarding`. Traefik intercepts incoming web traffic, cleanly terminates HTTPS SSL certificates, and routes you directly to Kibana at `kibana.tlsoc.local`. |
 | **Cert-Manager** | Security (TLS) | Acts as an internal Certificate Authority that dynamically provisions and automatically rotates TLS certificates for Kafka, Kibana, and Logstash. Eliminates manual certificate management. |
 | **KEDA** | Event-Driven Auto-Scaling | Scales the FOSS-Engine based on real Kafka consumer lag. When thousands of unread logs pile up on the Kafka broker, KEDA spins up more FOSS-Engine pods to burn through the backlog instantly. Far more precise than CPU-based scaling for queue-driven workloads. |
-| **VPA** | Vertical Resource Tuning | Watches all 6 services in observation mode and generates mathematically perfect CPU/RAM recommendations based on actual historical usage. Use its output to tune `values.yaml` and prevent OOM-kills or resource starvation. |
+| **VPA** | Vertical Resource Tuning | Watches all 5 services in observation mode (FOSS-Engine VPA covers both the engine and its Logstash sidecar via per-container recommendations) and generates mathematically perfect CPU/RAM recommendations based on actual historical usage. Use its output to tune `values.yaml` and prevent OOM-kills or resource starvation. |
 
 ---
 
@@ -206,11 +207,11 @@ Your target machine is now instantly shipping raw logs to the SOC!
 
 ## 🖥️ Scaling to Multiple Nodes (Multi-Laptop Cluster)
 
-TLSOC is designed to start on a single laptop and seamlessly expand to a multi-node cluster. Stateless workloads (FOSS-Engine, Logstash) will automatically distribute across all connected laptops via KEDA.
+TLSOC is designed to start on a single laptop and seamlessly expand to a multi-node cluster. KEDA automatically distributes FOSS-Engine pods (each containing a Logstash sidecar) across all connected laptops based on Kafka consumer lag.
 
 ### Architecture Overview
 * **Master Node (Control Plane):** Runs K3s Server, Elasticsearch, Kafka, and Redis. These stateful services are pinned here via `nodeSelector` so their data stays on one disk.
-* **Worker Nodes:** Run the lightweight, stateless workloads. Kubernetes automatically schedules FOSS-Engine and Logstash replicas onto these machines to share the parsing load.
+* **Worker Nodes:** Run the lightweight FOSS-Engine pods (each containing a Logstash sidecar). Kubernetes automatically schedules these onto worker machines to share the parsing load.
 
 ### How `add-worker.sh` Works
 To make joining nodes completely painless, we wrote `add-worker.sh`. It is an interactive script that runs on the new worker laptop. Under the hood, it:
@@ -278,8 +279,7 @@ sudo apt-get install -y open-iscsi nfs-common cryptsetup
 
 | Component | Runs on Worker? | Action Required? |
 |---|---|---|
-| FOSS-Engine | ✅ Yes (Deployment) | Must build Docker image on this node |
-| Logstash | ✅ Yes (Deployment) | No action — image pulled from Docker Hub |
+| FOSS-Engine + Logstash | ✅ Yes (StatefulSet + Sidecar) | Must build FOSS-Engine Docker image on this node. Logstash image auto-pulled from Docker Hub. |
 | Longhorn Agent | ✅ Yes (DaemonSet) | No action — auto-deployed by Longhorn |
 | Traefik Proxy | ✅ Yes (DaemonSet) | No action — auto-deployed by K3s |
 | Elasticsearch | ❌ No | Pinned to Master via `nodeSelector` |
@@ -397,6 +397,7 @@ When adding nodes, you might see red warning icons in the Longhorn UI under Node
   sudo systemctl enable iscsid
   kubectl delete pod -n longhorn-system -l app=longhorn-manager
   ```
+  > **Note:** If `apt-get` throws an error saying `Unable to locate package linux-modules-extra`, but the `sudo modprobe iscsi_tcp` command succeeds silently, it means your Linux kernel already has the module natively built-in! You can safely ignore the `apt-get` error.
 
 **2. `RequiredPackages` is Red**
 * **Issue:** The node failed to install the iSCSI clients automatically (usually due to a locked `apt` process). Without iSCSI, our stack cannot mount the Longhorn block-storage drives.
@@ -405,6 +406,7 @@ When adding nodes, you might see red warning icons in the Longhorn UI under Node
   sudo apt-get update && sudo apt-get install -y open-iscsi nfs-common cryptsetup
   sudo systemctl enable --now iscsid
   ```
+  > **Note:** If you see an error like `Could not get lock /var/lib/dpkg/lock-frontend (unattended-upgr)`, Ubuntu is installing security updates in the background. Do not reboot or kill the process. Simply wait 2-3 minutes for it to finish and run the command again.
 
 **3. `Multipathd` is Red**
 * **Issue:** A legacy background service called `multipathd` (used for physical enterprise SAN arrays) is running. If left active, it detects Longhorn's virtual drives and tries to manage them, causing a conflict that forces the drives into Read-Only mode and crashes our databases.
@@ -433,6 +435,7 @@ When adding nodes, you might see red warning icons in the Longhorn UI under Node
 * **Volumes Stuck in "Detached":** Ensure the Pod is actively scheduled. If a node crashes, enable the setting `Automatically Delete Workload Pod when Volume Detaches` so Kubernetes forces the Pod to respawn on a healthy node where the backup replica lives.
 * **"Scheduling Failure" on a Volume:** The remaining nodes don't have enough free storage. Either free up space or add another node.
 * **Red warnings for `KernelModulesLoaded` or `RequiredPackages`:** Install the missing dependencies: `sudo apt-get install -y open-iscsi nfs-common`. If the node still shows the warning but the overall status is `Ready`, Longhorn is falling back to basic block storage and will still work.
+* **Red node warnings won't disappear even after fixing them:** A `longhorn-manager` pod likely crashed and is stuck in `Terminating` state, preventing Longhorn from rescanning the nodes. Find the stuck pod (`kubectl get pods -n longhorn-system`) and force-delete it from the Master node: `kubectl delete pod <POD_NAME> -n longhorn-system --force --grace-period=0`.
 
 ---
 
@@ -472,7 +475,7 @@ kubectl get hpa -n tlsoc
 > kafka-topics.sh --alter --topic mailserver --partitions 3 --bootstrap-server localhost:9092
 > ```
 
-### VPA — Vertical Pod Autoscaler (for All 6 Services)
+### VPA — Vertical Pod Autoscaler (for All 5 Services)
 
 VPA runs in `updateMode: "Off"` (observation only). It watches every service and generates the mathematically ideal CPU and RAM values based on real historical usage. It never restarts your pods — it only gives you recommendations to act on manually.
 
@@ -483,8 +486,7 @@ kubectl describe vpa -n tlsoc
 # View recommendations for a specific service
 kubectl describe vpa elasticsearch-vpa -n tlsoc
 kubectl describe vpa kafka-vpa -n tlsoc
-kubectl describe vpa logstash-vpa -n tlsoc
-kubectl describe vpa foss-engine-vpa -n tlsoc
+kubectl describe vpa foss-engine-vpa -n tlsoc  # Includes both engine AND logstash sidecar recommendations
 kubectl describe vpa redis-vpa -n tlsoc
 kubectl describe vpa kibana-vpa -n tlsoc
 
@@ -605,7 +607,7 @@ Access the UI: `kubectl port-forward -n longhorn-system svc/longhorn-frontend 80
 
 ### Elasticsearch Node Scaling
 
-Elasticsearch is managed by the ECK Operator. To add nodes, edit `helm/tlsoc/templates/elastic.yaml`:
+Elasticsearch is managed by the ECK Operator. To add nodes, edit `helm/tlsoc/templates/eck.yaml`:
 ```yaml
 nodeSets:
 - name: default
@@ -693,14 +695,13 @@ kubectl get vpa -n tlsoc
 
 # Read VPA resource recommendations for a specific service
 kubectl describe vpa elasticsearch-vpa -n tlsoc
-kubectl describe vpa logstash-vpa -n tlsoc
-kubectl describe vpa foss-engine-vpa -n tlsoc
+kubectl describe vpa foss-engine-vpa -n tlsoc  # Covers both engine + logstash sidecar
 ```
 
 ### Advanced Operations (Rollbacks & DNS)
 ```bash
-# Instantly rollback a deployment if an update breaks it (e.g., Logstash crashing)
-kubectl rollout undo deployment logstash -n tlsoc
+# Instantly rollback the FOSS-Engine StatefulSet if an update breaks it
+kubectl rollout undo statefulset foss-engine -n tlsoc
 
 # Spin up a temporary Ubuntu pod to test internal DNS resolution (CoreDNS)
 kubectl run -i --tty --rm debug --image=ubuntu --restart=Never -n tlsoc -- sh -c "apt update && apt install dnsutils -y && nslookup kafka.tlsoc.svc.cluster.local"
@@ -711,8 +712,8 @@ kubectl run -i --tty --rm debug --image=ubuntu --restart=Never -n tlsoc -- sh -c
 # Watch the FOSS-Engine parse logs in real-time
 kubectl logs -l app=foss-engine -n tlsoc -f --tail=50
 
-# Watch Logstash pipeline logs
-kubectl logs -l app=logstash -n tlsoc -f --tail=50
+# Watch Logstash pipeline logs (sidecar inside foss-engine pod)
+kubectl logs -l app=foss-engine -c logstash -n tlsoc -f --tail=50
 
 # Watch Kafka broker logs
 kubectl logs -l app=kafka -n tlsoc -f --tail=50
@@ -975,11 +976,11 @@ kubectl exec -n tlsoc tlsoc-es-default-0 -- curl -s -u elastic:$PASSWORD \
 **Why:** ECK rotates internal TLS certificates when the Elasticsearch cluster is recreated or upgraded. Logstash's pod still holds the old CA certificate in memory.
 **The Fix:** Roll the Logstash deployment to force it to mount the new certificate:
 ```bash
-kubectl rollout restart deployment logstash -n tlsoc
+kubectl rollout restart statefulset foss-engine -n tlsoc
 
 # If Logstash is still not shipping (missed logs during downtime), wipe its position tracker:
-kubectl exec -n tlsoc deploy/logstash -- find /usr/share/logstash/state -name '.sincedb*' -delete
-kubectl rollout restart deployment logstash -n tlsoc
+kubectl exec -n tlsoc foss-engine-0 -c logstash -- find /usr/share/logstash/data -name '.sincedb*' -delete
+kubectl rollout restart statefulset foss-engine -n tlsoc
 ```
 
 ---
@@ -989,7 +990,7 @@ kubectl rollout restart deployment logstash -n tlsoc
 Instead of relying entirely on terminal commands, you can use **OpenLens** (a powerful, open-source desktop GUI for Kubernetes) to visually manage your SOC cluster.
 
 ### What it does:
-OpenLens allows you to graphically see all your pods, view live scrolling logs, access terminal shells inside containers, and monitor CPU/RAM usage across your FOSS-Engine and Logstash deployments in real-time.
+OpenLens allows you to graphically see all your pods, view live scrolling logs, access terminal shells inside containers, and monitor CPU/RAM usage across your FOSS-Engine StatefulSet and all sidecar containers in real-time.
 
 ### How to Install and Connect OpenLens on Ubuntu:
 1. Download the OpenLens AppImage for Linux from the official GitHub releases.
@@ -1015,7 +1016,7 @@ The FOSS-Engine solves this problem. It acts as a massive universal translator.
 ### The 5-Stage Pipeline
 
 #### Stage 1: Ingestion (Kafka Consumer)
-The Engine operates as a high-throughput **Kafka Consumer Group** (`group_id: foss-soc-engine`). It subscribes to a regex topic pattern `^(webserver|vulnerability|mailserver|proxyserver|summersoc|.*)$` to listen to all log streams simultaneously. Because it uses a Consumer Group, multiple engine pods can run concurrently, perfectly splitting the log parsing workload without duplicating logs. Kafka automatically load-balances partitions across all engine replicas.
+The Engine operates as a high-throughput **Kafka Consumer Group** (`group_id: foss-soc-engine`). It subscribes to a regex topic pattern `^(webserver|vulnerability|mailserver|proxyserver|summersoc)$` to listen to all log streams simultaneously. Because it uses a Consumer Group, multiple engine pods can run concurrently, perfectly splitting the log parsing workload without duplicating logs. Kafka automatically load-balances partitions across all engine replicas.
 
 #### Stage 2: Rule Mapping (`program_mapping`)
 When a log arrives, it has a metadata tag (e.g., `waf-nginx-access`). The Engine reads the `program_mapping` section of its `config.yaml` to determine which rule file to use:
@@ -1038,14 +1039,12 @@ If the log contains a public IP address (`source.ip`), the Engine performs an ul
 Once the log is a perfectly formatted JSON object, the Engine batches up to **1000 logs** (or waits **5 seconds**, whichever comes first) and drops them as a single `.json` file into the `/parser_output/` directory.
 
 ### StatefulSet & RWO Storage Architecture (The Fix for NFS Locks)
-To prevent Linux `inotify` file-watching bugs associated with NFS (ReadWriteMany) network drives, the FOSS-Engine is deployed as a **StatefulSet**. This guarantees that every single FOSS-Engine pod gets its own dedicated, isolated **Longhorn ReadWriteOnce (RWO)** hard drive (`/parser_output`). Because the drive is strictly attached to one pod, Logstash can instantly and reliably detect file changes using native block-storage events.
+To prevent Linux `inotify` file-watching bugs associated with NFS (ReadWriteMany) network drives, the FOSS-Engine is deployed as a **StatefulSet**. This guarantees that every single FOSS-Engine pod gets its own dedicated, isolated **Longhorn ReadWriteOnce (RWO)** hard drive (`/parser_output`). Because the drive is strictly attached to one pod, Logstash can instantly and reliably detect file changes using native Linux inotify events.
 
-### Zero-Trust Architecture
-Logstash operates under a strict Zero-Trust model to protect parsed data:
-* The `/parser_output` volume (containing the critical JSON logs) is mounted strictly as `readOnly: true` to Logstash. 
-* Logstash's internal file-tracking database (`.sincedb`) is persisted to its own isolated `logstash-state` volume.
+### Sidecar Architecture
+Logstash runs as a sidecar container in the same pod as the FOSS-Engine, sharing the `/parser_output` volume. Logstash requires write access to this volume because it stores its internal file-tracking database (`.sincedb` files) alongside the parsed JSON logs. This `.sincedb` file tracks which lines Logstash has already shipped to Elasticsearch, ensuring exactly-once delivery even after pod restarts.
 
-This ensures that if Logstash is ever compromised, attackers cannot modify or delete the original parsed logs.
+The FOSS-Engine Docker image enforces a non-root security model (`appuser`, UID 1001) to limit the blast radius of any potential compromise.
 
 ### Source Code & Image Build
 
